@@ -1,0 +1,25 @@
+modules:
+  jira:projectPage:
+    - key: tracewise-hello-world-project-page
+      resource: main
+      resolver:
+        function: resolver
+      title: TraceWise
+  jira:globalPage:
+    - key: tracewise-hello-world-global-page
+      resource: main
+      resolver:
+        function: resolver
+      title: TraceWise
+  function:
+    - key: resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: static/hello-world/build
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/df979358-8675-46fc-88c6-d99e04c2a1bc
