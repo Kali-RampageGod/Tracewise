@@ -1,6 +1,6 @@
 modules:
   jira:projectPage:
-    - key: tracewise-hello-world-project-page
+    - key: tracewise-project-page
       resource: main
       resolver:
         function: resolver
@@ -12,7 +12,7 @@ modules:
         function: resolver
       title: TraceWise
   jira:globalPage:
-    - key: tracewise-hello-world-global-page
+    - key: tracewise-global-page
       resource: main
       resolver:
         function: resolver
@@ -29,8 +29,13 @@ modules:
         - How many open findings does Tracewise have?
       actions:
         - tracewise-ping
+  consumer:
+    - key: tracewise-ingest-consumer
+      queue: tracewise-ingest
+      function: ingest-consumer
   action:
     - key: tracewise-ping
+      name: Tracewise ping
       function: rovo-ping
       actionVerb: GET
       description: Returns the number of open findings stored by Tracewise.
@@ -40,6 +45,17 @@ modules:
           type: string
           required: false
           description: The user's question, for context only.
+  trigger:
+    - key: tracewise-confluence-events
+      function: source-event
+      events:
+        - avi:confluence:created:page
+        - avi:confluence:updated:page
+    - key: tracewise-jira-events
+      function: source-event
+      events:
+        - avi:jira:created:issue
+        - avi:jira:updated:issue
   sql:
     - key: main
       engine: mysql
@@ -54,12 +70,19 @@ modules:
       handler: migrations.runMigration
     - key: rovo-ping
       handler: rovo-poc.ping
+    - key: source-event
+      handler: triggers.onSourceEvent
+    - key: ingest-consumer
+      handler: consumer.handler
+      timeoutSeconds: 120
 resources:
   - key: main
     path: static/hello-world/build
 permissions:
   scopes:
     - read:page:confluence
+    - read:confluence-content.summary
+    - read:jira-work
 app:
   runtime:
     name: nodejs24.x
