@@ -11,12 +11,24 @@ modules:
       resolver:
         function: resolver
       title: TraceWise
+  sql:
+    - key: main
+      engine: mysql
+  scheduledTrigger:
+    - key: tracewise-migrate
+      function: run-migration
+      interval: hour
   function:
     - key: resolver
       handler: index.handler
+    - key: run-migration
+      handler: sql-poc.runMigration
 resources:
   - key: main
     path: static/hello-world/build
+permissions:
+  scopes:
+    - read:page:confluence
 app:
   runtime:
     name: nodejs24.x
