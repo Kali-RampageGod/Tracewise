@@ -5,6 +5,12 @@ modules:
       resolver:
         function: resolver
       title: TraceWise
+  jira:projectSettingsPage:
+    - key: tracewise-settings-page
+      resource: main
+      resolver:
+        function: resolver
+      title: TraceWise
   jira:globalPage:
     - key: tracewise-hello-world-global-page
       resource: main
@@ -45,7 +51,7 @@ modules:
     - key: resolver
       handler: index.handler
     - key: run-migration
-      handler: sql-poc.runMigration
+      handler: migrations.runMigration
     - key: rovo-ping
       handler: rovo-poc.ping
 resources:

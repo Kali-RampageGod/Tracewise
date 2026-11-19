@@ -1,6 +1,7 @@
 import Resolver from '@forge/resolver';
 import api, { route } from '@forge/api';
 import { runMigration, sqlPoc } from './sql-poc';
+import { runMigration as runAllMigrations, listMigrations } from './migrations';
 
 const resolver = new Resolver();
 
@@ -15,6 +16,23 @@ resolver.define('runMigration', async () => {
     return 'Migration OK: ' + JSON.stringify(applied);
   } catch (e) {
     return 'Migration ERROR: ' + describe(e);
+  }
+});
+
+resolver.define('migrate', async () => {
+  try {
+    const applied = await runAllMigrations();
+    return 'OK applied: ' + JSON.stringify(applied);
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
+  }
+});
+
+resolver.define('migrationStatus', async () => {
+  try {
+    return 'OK ' + JSON.stringify(await listMigrations());
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
   }
 });
 
