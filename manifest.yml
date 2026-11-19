@@ -11,6 +11,29 @@ modules:
       resolver:
         function: resolver
       title: TraceWise
+  rovo:agent:
+    - key: tracewise-advisor
+      name: Tracewise Release Advisor
+      description: Explains the release confidence score for a project.
+      prompt: >
+        You are the Tracewise Release Advisor. When the user asks about release
+        readiness or open findings, call the tracewise-ping action and report
+        exactly what it returns. Do not invent numbers.
+      conversationStarters:
+        - How many open findings does Tracewise have?
+      actions:
+        - tracewise-ping
+  action:
+    - key: tracewise-ping
+      function: rovo-ping
+      actionVerb: GET
+      description: Returns the number of open findings stored by Tracewise.
+      inputs:
+        question:
+          title: Question
+          type: string
+          required: false
+          description: The user's question, for context only.
   sql:
     - key: main
       engine: mysql
@@ -23,6 +46,8 @@ modules:
       handler: index.handler
     - key: run-migration
       handler: sql-poc.runMigration
+    - key: rovo-ping
+      handler: rovo-poc.ping
 resources:
   - key: main
     path: static/hello-world/build
