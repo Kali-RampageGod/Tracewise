@@ -5,6 +5,7 @@ import { runMigration as runAllMigrations, listMigrations } from './migrations';
 import { reconcile } from './ingest/reconcile';
 import { assessRelease, getHistory } from './score/store';
 import { newId } from './id';
+import { createHash } from 'crypto';
 import sql from '@forge/sql';
 const resolver = new Resolver();
 
@@ -137,6 +138,42 @@ resolver.define('getOverview', async ({ payload }) => {
     return { empty: false, ...row, breakdown: JSON.parse(row.breakdown) };
   } catch (e) {
     return { error: describe(e) };
+  }
+});
+
+// Thin slice: stores one hand-made decision that points at a real Confluence page.
+resolver.define('decisionDemoCreate', async ({ payload }) => {
+  try {
+    const { projectKey, pageId } = payload;
+    if (!/^\d+$/.test(pageId || '')) return 'ERROR: page id must be digits only';
+    const text = 'We will use MySQL as the database. We will not use MongoDB.';
+    const hash = createHash('sha256').update(text).digest('hex');
+    await sql
+      .prepare(
+        `INSERT INTO decisions
+           (id, project_key, page_id, page_title, page_version, block_id,
+            decision_text, content_hash, status, decided_at)
+         VALUES (?, ?, ?, ?, 1, 'demo', ?, ?, 'active', CURRENT_TIMESTAMP)
+         ON DUPLICATE KEY UPDATE decision_text = VALUES(decision_text)`
+      )
+      .bindParams(newId(), projectKey, pageId, 'Decision: Use MySQL, not MongoDB', text, hash)
+      .execute();
+    const r = await sql
+      .prepare('SELECT page_id, page_title, decision_text, status FROM decisions WHERE project_key = ?')
+      .bindParams(projectKey)
+      .execute();
+    return 'OK ' + JSON.stringify(r.rows, null, 1);
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
+  }
+});
+
+resolver.define('decisionDemoClear', async ({ payload }) => {
+  try {
+    await sql.prepare("DELETE FROM decisions WHERE project_key = ? AND block_id = 'demo'").bindParams(payload.projectKey).execute();
+    return 'OK demo decision cleared';
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
   }
 });
 

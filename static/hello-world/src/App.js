@@ -63,6 +63,7 @@ function ProjectPage({ projectKey }) {
 function SettingsPage({ projectKey }) {
   const [out, setOut] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pageId, setPageId] = useState('');
   const call = async (name, payload) => {
     setBusy(true);
     setOut('Running ' + name + '...');
@@ -88,6 +89,10 @@ function SettingsPage({ projectKey }) {
           <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'gate', severity: 3 })}>Add high gate problem</button>{' '}
           <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'secret', severity: 4 })}>Add critical secret</button>{' '}
           <button disabled={busy} onClick={() => call('scoreDemoClear', { projectKey })}>Clear demo data</button>
+          <br /><br />
+          <input placeholder="Confluence page id" value={pageId} onChange={(e) => setPageId(e.target.value)} />{' '}
+          <button disabled={busy} onClick={() => call('decisionDemoCreate', { projectKey, pageId })}>Create demo decision</button>{' '}
+          <button disabled={busy} onClick={() => call('decisionDemoClear', { projectKey })}>Clear demo decision</button>
         </div>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
       </div>
