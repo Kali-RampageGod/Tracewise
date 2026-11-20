@@ -2,7 +2,8 @@ import Resolver from '@forge/resolver';
 import api, { route } from '@forge/api';
 import { runMigration, sqlPoc } from './sql-poc';
 import { runMigration as runAllMigrations, listMigrations } from './migrations';
-
+import { reconcile } from './ingest/reconcile';
+import sql from '@forge/sql';
 const resolver = new Resolver();
 
 const describe = (e) =>
@@ -67,4 +68,23 @@ resolver.define('versionPoc', async ({ payload }) => {
   }
 });
 
+resolver.define('reconcileNow', async () => {
+  try {
+    return 'OK ' + JSON.stringify(await reconcile());
+  } catch (e) {
+    return 'ERROR: ' + e.message;
+  }
+});
+
+
+resolver.define('processedEvents', async () => {
+  try {
+    const r = await sql
+      .prepare('SELECT event_key, event_type, processed_at FROM processed_events ORDER BY processed_at DESC LIMIT 15')
+      .execute();
+    return 'OK ' + JSON.stringify(r.rows, null, 1);
+  } catch (e) {
+    return 'ERROR: ' + e.message;
+  }
+});
 export const handler = resolver.getDefinitions();

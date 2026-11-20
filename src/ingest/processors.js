@@ -17,4 +17,6 @@ async function recordIngest(job, scanType) {
 
 export const processors = {
   jira_issue: (job) => recordIngest(job, 'ingest_jira'),
+  confluence_page: (job) => recordIngest(job, 'ingest_confluence'),
 };
+

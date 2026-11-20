@@ -46,11 +46,6 @@ modules:
           required: false
           description: The user's question, for context only.
   trigger:
-    - key: tracewise-confluence-events
-      function: source-event
-      events:
-        - avi:confluence:created:page
-        - avi:confluence:updated:page
     - key: tracewise-jira-events
       function: source-event
       events:
@@ -63,6 +58,9 @@ modules:
     - key: tracewise-migrate
       function: run-migration
       interval: hour
+    - key: tracewise-reconcile
+      function: reconcile-scan
+      interval: hour
   function:
     - key: resolver
       handler: index.handler
@@ -74,6 +72,9 @@ modules:
       handler: triggers.onSourceEvent
     - key: ingest-consumer
       handler: consumer.handler
+      timeoutSeconds: 120
+    - key: reconcile-scan
+      handler: reconcile.run
       timeoutSeconds: 120
 resources:
   - key: main

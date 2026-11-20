@@ -53,6 +53,8 @@ function SettingsPage({ projectKey }) {
         <div>
           <button disabled={busy} onClick={() => call('migrate')}>Run migrations</button>{' '}
           <button disabled={busy} onClick={() => call('migrationStatus')}>Show applied migrations</button>
+          <button disabled={busy} onClick={() => call('reconcileNow')}>Run scan now</button>
+          <button disabled={busy} onClick={() => call('processedEvents')}>Show processed events</button>
         </div>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
       </div>
