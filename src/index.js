@@ -3,6 +3,8 @@ import api, { route } from '@forge/api';
 import { runMigration, sqlPoc } from './sql-poc';
 import { runMigration as runAllMigrations, listMigrations } from './migrations';
 import { reconcile } from './ingest/reconcile';
+import { assessRelease, getHistory } from './score/store';
+import { newId } from './id';
 import sql from '@forge/sql';
 const resolver = new Resolver();
 
@@ -87,4 +89,35 @@ resolver.define('processedEvents', async () => {
     return 'ERROR: ' + e.message;
   }
 });
+// Test helper: adds one fake finding to the fake release "demo", then scores it.
+resolver.define('scoreDemo', async ({ payload }) => {
+  try {
+    const { projectKey, type, severity } = payload;
+    await sql
+      .prepare(
+        `INSERT INTO findings
+           (id, project_key, release_id, type, severity, source_type, source_id, fingerprint, title)
+         VALUES (?, ?, 'demo', ?, ?, 'demo', ?, ?, ?)`
+      )
+      .bindParams(newId(), projectKey, type, severity, newId(), newId(), `Demo ${type} (sev ${severity})`)
+      .execute();
+    const result = await assessRelease(projectKey, 'demo');
+    const history = await getHistory(projectKey, 'demo');
+    return 'OK ' + JSON.stringify({ result, history }, null, 1);
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
+  }
+});
+
+// Removes all demo data again.
+resolver.define('scoreDemoClear', async ({ payload }) => {
+  try {
+    await sql.prepare("DELETE FROM findings WHERE project_key = ? AND release_id = 'demo'").bindParams(payload.projectKey).execute();
+    await sql.prepare("DELETE FROM release_assessments WHERE project_key = ? AND release_id = 'demo'").bindParams(payload.projectKey).execute();
+    return 'OK demo data cleared';
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
+  }
+});
+
 export const handler = resolver.getDefinitions();

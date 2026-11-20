@@ -34,10 +34,10 @@ function ProjectPage({ projectKey }) {
 function SettingsPage({ projectKey }) {
   const [out, setOut] = useState('');
   const [busy, setBusy] = useState(false);
-  const call = async (name) => {
+  const call = async (name, payload) => {
     setBusy(true);
     setOut('Running ' + name + '...');
-    try { setOut(String(await invoke(name))); }
+    try { setOut(String(await invoke(name, payload))); }
     catch (e) { setOut('Error: ' + (e && e.message ? e.message : JSON.stringify(e))); }
     setBusy(false);
   };
@@ -55,6 +55,10 @@ function SettingsPage({ projectKey }) {
           <button disabled={busy} onClick={() => call('migrationStatus')}>Show applied migrations</button>
           <button disabled={busy} onClick={() => call('reconcileNow')}>Run scan now</button>
           <button disabled={busy} onClick={() => call('processedEvents')}>Show processed events</button>
+          <br /><br />
+          <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'gate', severity: 3 })}>Add high gate problem</button>{' '}
+          <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'secret', severity: 4 })}>Add critical secret</button>{' '}
+          <button disabled={busy} onClick={() => call('scoreDemoClear', { projectKey })}>Clear demo data</button>
         </div>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
       </div>
