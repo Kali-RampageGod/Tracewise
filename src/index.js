@@ -120,4 +120,24 @@ resolver.define('scoreDemoClear', async ({ payload }) => {
   }
 });
 
+// Dashboard: latest saved score for a project (any release).
+resolver.define('getOverview', async ({ payload }) => {
+  try {
+    const r = await sql
+      .prepare(
+        `SELECT release_id, score, band, blocked_reason, open_findings, breakdown, computed_at
+           FROM release_assessments
+          WHERE project_key = ?
+          ORDER BY computed_at DESC LIMIT 1`
+      )
+      .bindParams(payload.projectKey)
+      .execute();
+    const row = r.rows[0];
+    if (!row) return { empty: true };
+    return { empty: false, ...row, breakdown: JSON.parse(row.breakdown) };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
 export const handler = resolver.getDefinitions();

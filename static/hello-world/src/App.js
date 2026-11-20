@@ -10,6 +10,19 @@ const tabBtn = (active) => ({
 function ProjectPage({ projectKey }) {
   const tabs = ['Overview', 'Decisions', 'Findings', 'Release gate'];
   const [tab, setTab] = useState('Overview');
+  const [ov, setOv] = useState(null);
+
+  // Load the latest score whenever the Overview tab is opened.
+  useEffect(() => {
+    if (!projectKey || tab !== 'Overview') return;
+    invoke('getOverview', { projectKey })
+      .then(setOv)
+      .catch((e) => setOv({ error: String(e && e.message ? e.message : e) }));
+  }, [projectKey, tab]);
+
+  const color = { ready: '#1f845a', at_risk: '#b38600', blocked: '#c9372c' };
+  const label = { ready: 'Ready', at_risk: 'At risk', blocked: 'Blocked' };
+
   return (
     <div>
       <h2>TraceWise {projectKey ? `· ${projectKey}` : ''}</h2>
@@ -21,7 +34,23 @@ function ProjectPage({ projectKey }) {
       {tab === 'Overview' && (
         <div style={card}>
           <b>Release confidence score</b>
-          <p>No assessment yet. Scans and scoring are added in the next blocks.</p>
+          {!ov && <p>Loading...</p>}
+          {ov && ov.error && <p>Error: {ov.error}</p>}
+          {ov && ov.empty && <p>No assessment yet.</p>}
+          {ov && !ov.empty && !ov.error && (
+            <div>
+              <div style={{ fontSize: 48, fontWeight: 700, color: color[ov.band] }}>{ov.score}</div>
+              <div style={{ fontWeight: 600, color: color[ov.band] }}>{label[ov.band] || ov.band}</div>
+              {ov.blocked_reason && <p>Reason: {ov.blocked_reason}</p>}
+              <p>{ov.open_findings} open findings · release {ov.release_id} · {ov.computed_at}</p>
+              <b>Where the points went</b>
+              <ul>
+                {ov.breakdown.map((b) => (
+                  <li key={b.finding_id}>-{b.points}: {b.title} ({b.reason})</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
       {tab === 'Decisions' && <div style={card}>Decision Memory will list decisions here.</div>}
