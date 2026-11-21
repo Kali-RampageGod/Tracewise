@@ -6,6 +6,7 @@ import { reconcile } from './ingest/reconcile';
 import { assessRelease, getHistory } from './score/store';
 import { newId } from './id';
 import { createHash } from 'crypto';
+import { scanIssue } from './decisions/scan';
 import sql from '@forge/sql';
 const resolver = new Resolver();
 
@@ -171,9 +172,42 @@ resolver.define('decisionDemoCreate', async ({ payload }) => {
 resolver.define('decisionDemoClear', async ({ payload }) => {
   try {
     await sql.prepare("DELETE FROM decisions WHERE project_key = ? AND block_id = 'demo'").bindParams(payload.projectKey).execute();
+    await sql.prepare("DELETE FROM findings WHERE project_key = ? AND type = 'decision_conflict'").bindParams(payload.projectKey).execute();
     return 'OK demo decision cleared';
   } catch (e) {
     return 'ERROR: ' + describe(e);
+  }
+});
+
+resolver.define('decisionDemoScan', async ({ payload }) => {
+  try {
+    const r = await scanIssue(payload.projectKey, payload.issueKey);
+    return 'OK ' + JSON.stringify(r, null, 1);
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
+  }
+});
+
+// Findings tab: open findings of a project, worst first.
+resolver.define('getFindings', async ({ payload }) => {
+  try {
+    const r = await sql
+      .prepare(
+        `SELECT id, type, severity, title, detail, evidence_confidence, first_seen_at
+           FROM findings
+          WHERE project_key = ? AND status = 'open'
+          ORDER BY severity DESC, first_seen_at DESC LIMIT 50`
+      )
+      .bindParams(payload.projectKey)
+      .execute();
+    const rows = r.rows.map((f) => {
+      let detail = null;
+      try { detail = f.detail ? JSON.parse(f.detail) : null; } catch (e) { /* keep null */ }
+      return { ...f, detail };
+    });
+    return { rows };
+  } catch (e) {
+    return { error: describe(e) };
   }
 });
 

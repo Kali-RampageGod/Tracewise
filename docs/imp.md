@@ -10,3 +10,20 @@ How the release score is calculated (`src/score/engine.js`):
 6. A confirmed critical secret means Blocked, whatever the score.
 
 All numbers live in `DEFAULT_CONFIG` in `engine.js`. Change them there.
+
+# Decision Memory (thin slice)
+
+Goal: prove the main feature works before building the other modules.
+
+How it works:
+1. A team decision is stored as a row in the `decisions` table (page id, text, status).
+2. A Jira issue is turned into keywords, and ignored little words (`src/decisions/match.js`).
+3. If the issue and an active decision share 2 or more keywords, the decision is returned as a related match.
+4. A match will become a finding that links back to the original Confluence page.
+
+Limits:
+- It finds related decisions only. It does not yet judge whether the issue contradicts the decision (the AI step comes later).
+- Superseded decisions never match.
+- The minimum overlap (default 2) can be tuned.
+
+Tests: `tests/match.test.js`

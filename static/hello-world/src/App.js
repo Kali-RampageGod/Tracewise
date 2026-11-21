@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { invoke, view } from '@forge/bridge';
+import { invoke, view, router } from '@forge/bridge';
 
 const card = { border: '1px solid #ddd', borderRadius: 8, padding: 16, marginBottom: 12 };
 const tabBtn = (active) => ({
@@ -19,6 +19,16 @@ function ProjectPage({ projectKey }) {
       .then(setOv)
       .catch((e) => setOv({ error: String(e && e.message ? e.message : e) }));
   }, [projectKey, tab]);
+
+  const [fl, setFl] = useState(null);
+  useEffect(() => {
+    if (!projectKey || tab !== 'Findings') return;
+    invoke('getFindings', { projectKey })
+      .then(setFl)
+      .catch((e) => setFl({ error: String(e && e.message ? e.message : e) }));
+  }, [projectKey, tab]);
+  const sev = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
+  const conf = (c) => (Number(c) >= 80 ? 'confirmed' : Number(c) >= 40 ? 'unclear' : 'weak');
 
   const color = { ready: '#1f845a', at_risk: '#b38600', blocked: '#c9372c' };
   const label = { ready: 'Ready', at_risk: 'At risk', blocked: 'Blocked' };
@@ -54,7 +64,26 @@ function ProjectPage({ projectKey }) {
         </div>
       )}
       {tab === 'Decisions' && <div style={card}>Decision Memory will list decisions here.</div>}
-      {tab === 'Findings' && <div style={card}>Secret and gate findings will appear here.</div>}
+      {tab === 'Findings' && (
+        <div style={card}>
+          <b>Open findings</b>
+          {!fl && <p>Loading...</p>}
+          {fl && fl.error && <p>Error: {fl.error}</p>}
+          {fl && !fl.error && fl.rows.length === 0 && <p>No open findings.</p>}
+          {fl && !fl.error && fl.rows.map((f) => (
+            <div key={f.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
+              <div><b>{f.title}</b></div>
+              <div>{sev[f.severity]} · {conf(f.evidence_confidence)} ({f.evidence_confidence}) · first seen {f.first_seen_at}</div>
+              {f.detail && f.detail.shared && <div>Matched words: {f.detail.shared.join(', ')}</div>}
+              {f.detail && f.detail.pageId && (
+                <a href="#" onClick={(e) => { e.preventDefault(); router.open('/wiki/pages/viewpage.action?pageId=' + f.detail.pageId); }}>
+                  Open the original decision: {f.detail.pageTitle}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {tab === 'Release gate' && <div style={card}>The Ready, At risk or Blocked verdict will appear here.</div>}
     </div>
   );
@@ -64,6 +93,7 @@ function SettingsPage({ projectKey }) {
   const [out, setOut] = useState('');
   const [busy, setBusy] = useState(false);
   const [pageId, setPageId] = useState('');
+  const [issueKey, setIssueKey] = useState('TRAC-2');
   const call = async (name, payload) => {
     setBusy(true);
     setOut('Running ' + name + '...');
@@ -85,14 +115,20 @@ function SettingsPage({ projectKey }) {
           <button disabled={busy} onClick={() => call('migrationStatus')}>Show applied migrations</button>
           <button disabled={busy} onClick={() => call('reconcileNow')}>Run scan now</button>
           <button disabled={busy} onClick={() => call('processedEvents')}>Show processed events</button>
+
           <br /><br />
           <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'gate', severity: 3 })}>Add high gate problem</button>{' '}
           <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'secret', severity: 4 })}>Add critical secret</button>{' '}
           <button disabled={busy} onClick={() => call('scoreDemoClear', { projectKey })}>Clear demo data</button>
+
           <br /><br />
           <input placeholder="Confluence page id" value={pageId} onChange={(e) => setPageId(e.target.value)} />{' '}
           <button disabled={busy} onClick={() => call('decisionDemoCreate', { projectKey, pageId })}>Create demo decision</button>{' '}
           <button disabled={busy} onClick={() => call('decisionDemoClear', { projectKey })}>Clear demo decision</button>
+
+          <br /><br />
+          <input value={issueKey} onChange={(e) => setIssueKey(e.target.value)} />{' '}
+          <button disabled={busy} onClick={() => call('decisionDemoScan', { projectKey, issueKey })}>Scan issue</button>
         </div>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
       </div>
