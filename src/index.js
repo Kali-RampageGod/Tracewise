@@ -193,7 +193,7 @@ resolver.define('getFindings', async ({ payload }) => {
   try {
     const r = await sql
       .prepare(
-        `SELECT id, type, severity, title, detail, evidence_confidence, first_seen_at
+        `SELECT id, type, severity, title, detail, redacted_preview, evidence_confidence, first_seen_at
            FROM findings
           WHERE project_key = ? AND status = 'open'
           ORDER BY severity DESC, first_seen_at DESC LIMIT 50`
@@ -208,6 +208,15 @@ resolver.define('getFindings', async ({ payload }) => {
     return { rows };
   } catch (e) {
     return { error: describe(e) };
+  }
+});
+
+resolver.define('secretScanClear', async ({ payload }) => {
+  try {
+    await sql.prepare("DELETE FROM findings WHERE project_key = ? AND type = 'secret' AND source_type = 'jira_issue'").bindParams(payload.projectKey).execute();
+    return 'OK scanned secret findings cleared';
+  } catch (e) {
+    return 'ERROR: ' + describe(e);
   }
 });
 

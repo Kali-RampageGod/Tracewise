@@ -75,6 +75,7 @@ function ProjectPage({ projectKey }) {
               <div><b>{f.title}</b></div>
               <div>{sev[f.severity]} · {conf(f.evidence_confidence)} ({f.evidence_confidence}) · first seen {f.first_seen_at}</div>
               {f.detail && f.detail.shared && <div>Matched words: {f.detail.shared.join(', ')}</div>}
+              {f.redacted_preview && <div>Found: <code>{f.redacted_preview}</code> (real value never stored)</div>}
               {f.detail && f.detail.pageId && (
                 <a href="#" onClick={(e) => { e.preventDefault(); router.open('/wiki/pages/viewpage.action?pageId=' + f.detail.pageId); }}>
                   Open the original decision: {f.detail.pageTitle}
@@ -129,6 +130,8 @@ function SettingsPage({ projectKey }) {
           <br /><br />
           <input value={issueKey} onChange={(e) => setIssueKey(e.target.value)} />{' '}
           <button disabled={busy} onClick={() => call('decisionDemoScan', { projectKey, issueKey })}>Scan issue</button>
+
+          {' '}<button disabled={busy} onClick={() => call('secretScanClear', { projectKey })}>Clear scanned secrets</button>
         </div>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
       </div>
