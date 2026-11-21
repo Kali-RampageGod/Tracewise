@@ -77,3 +77,34 @@ test('a failing re-score is rethrown and nothing is recorded, so the job retries
   await assert.rejects(() => p(job), /db busy/);
   assert.equal(calls.filter((c) => c[0] === 'record').length, 0);
 });
+
+test('gate runs for the issue fix versions, between scan and assess', async () => {
+  const calls = [];
+  const proc = makeJiraProcessor({
+    scanIssue: async () => { calls.push('scan'); return { projectKey: 'TRAC', fixVersionIds: ['10001'] }; },
+    gate: async (p, ids) => { calls.push('gate:' + p + ':' + ids.join(',')); },
+    assess: async () => calls.push('assess'),
+    recordIngest: async () => calls.push('record'),
+  });
+  await proc({ sourceRef: 'TRAC-1', projectKey: 'TRAC' });
+  assert.deepEqual(calls, ['scan', 'gate:TRAC:10001', 'assess', 'record']);
+});
+
+test('gate is skipped when the issue has no fix version; a gate error means no record', async () => {
+  const calls = [];
+  const ok = makeJiraProcessor({
+    scanIssue: async () => ({ projectKey: 'TRAC', fixVersionIds: [] }),
+    gate: async () => calls.push('gate'),
+    assess: async () => calls.push('assess'),
+    recordIngest: async () => calls.push('record'),
+  });
+  await ok({ sourceRef: 'TRAC-1' });
+  assert.deepEqual(calls, ['assess', 'record']);
+  const bad = makeJiraProcessor({
+    scanIssue: async () => ({ projectKey: 'TRAC', fixVersionIds: ['1'] }),
+    gate: async () => { throw new Error('API 503'); },
+    assess: async () => {}, recordIngest: async () => calls.push('record2'),
+  });
+  await assert.rejects(bad({ sourceRef: 'TRAC-1' }), /503/);
+  assert.ok(!calls.includes('record2'));
+});

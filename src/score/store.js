@@ -1,10 +1,10 @@
 import sql from '@forge/sql';
 import { newId } from '../id';
-import { computeScore } from './engine';
+import { computeScore, DEFAULT_CONFIG } from './engine';
 
 // Reads open findings for a release, scores them, saves the result.
 // Findings with release_id NULL count for every release of the project.
-export async function assessRelease(projectKey, releaseId) {
+export async function assessRelease(projectKey, releaseId, overrides = {}) {
     // 1. Get the open findings.
     const found = await sql
         .prepare(
@@ -18,7 +18,7 @@ export async function assessRelease(projectKey, releaseId) {
     const findings = found.rows;
 
     // 2. Score them with the pure calculator from part 1.
-    const result = computeScore(findings);
+    const result = computeScore(findings, { ...DEFAULT_CONFIG, ...overrides });
     const breakdown = JSON.stringify(result.breakdown);
 
     // Overall confidence = average of the findings' confidence (100 if none).

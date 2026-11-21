@@ -5,6 +5,7 @@ import { confluenceGet, jiraGet, json } from '../api';
 import { newId } from '../id';
 import { jobFromConfluencePage, jobFromJiraIssue, nextCursor, chunk } from './normalize';
 import { isStale } from './freshness';
+import { refreshTrackedGates } from '../gate';
 
 const queue = new Queue({ key: 'tracewise-ingest' });
 const OVERLAP_MS = 15 * 60 * 1000;      // re-read the last 15 minutes: duplicates are harmless
@@ -121,6 +122,11 @@ export async function reconcile() {
       report[name] = { error: e.message };
       await markError(name, e.message);
     }
+  }
+  try {
+    report.gates = await refreshTrackedGates();
+  } catch (e) {
+    report.gates = { error: e.message };
   }
   console.log('TW_RECONCILE', JSON.stringify(report));
   return report;

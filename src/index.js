@@ -8,6 +8,10 @@ import { newId } from './id';
 import { createHash } from 'crypto';
 import { scanIssue } from './decisions/scan';
 import sql from '@forge/sql';
+import { gate } from './gate';
+import { listVersions, hasPermission } from './gate/jira';
+import { loadPolicy, savePolicy } from './gate/store';
+import { PAGE_SIZE, parseStatus, shapeDecisions } from './decisions/list';
 const resolver = new Resolver();
 
 const describe = (e) =>
@@ -189,6 +193,99 @@ resolver.define('decisionDemoScan', async ({ payload }) => {
 });
 
 // Findings tab: open findings of a project, worst first.
+resolver.define('getDecisions', async ({ payload }) => {
+  try {
+    const status = parseStatus(payload.status);
+    const offset = Math.max(0, Number(payload.offset) || 0);
+    const where = status === 'all' ? '' : 'AND status = ?';
+    const params = [payload.projectKey];
+    if (status !== 'all') params.push(status);
+    const r = await sql
+      .prepare(
+        `SELECT id, page_id, page_title, page_version, decision_text, status, decided_at
+           FROM decisions
+          WHERE project_key IN (?, '_site') ${where}
+          ORDER BY updated_at DESC, id LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`
+      )
+      .bindParams(...params)
+      .execute();
+    const ids = r.rows.slice(0, PAGE_SIZE).map((d) => d.id);
+    let replacements = [];
+    if (ids.length) {
+      const q = await sql
+        .prepare(`SELECT id, supersedes_id, decision_text, page_version FROM decisions WHERE supersedes_id IN (${ids.map(() => '?').join(',')})`)
+        .bindParams(...ids)
+        .execute();
+      replacements = q.rows;
+    }
+    const f = await sql
+      .prepare("SELECT title, detail FROM findings WHERE project_key = ? AND type = 'decision_conflict' AND status = 'open' LIMIT 500")
+      .bindParams(payload.projectKey)
+      .execute();
+    return shapeDecisions(r.rows, replacements, f.rows);
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// ---- Release Gate ----
+const PROJECT_KEY = /^[A-Z][A-Z0-9_]{1,31}$/;
+const guard = async (projectKey, permission) => {
+  if (!PROJECT_KEY.test(String(projectKey || ''))) return 'Invalid project';
+  if (!(await hasPermission(projectKey, permission))) return 'You do not have permission for this project';
+  return null;
+};
+
+// Versions of the project for the picker: unreleased first, by release date.
+resolver.define('getReleases', async ({ payload }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    const rows = (await listVersions(payload.projectKey)).filter((v) => !v.archived);
+    rows.sort((a, b) =>
+      Number(a.released) - Number(b.released) ||
+      String(a.releaseDate || '9999').localeCompare(String(b.releaseDate || '9999')) ||
+      a.name.localeCompare(b.name));
+    return { rows };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// Reads Jira now, applies the policy, saves findings and the score, returns the full verdict.
+resolver.define('runGate', async ({ payload }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    return await gate.runGate(payload.projectKey, payload.versionId);
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+resolver.define('getGatePolicy', async ({ payload }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    return {
+      policy: await loadPolicy(payload.projectKey),
+      canEdit: await hasPermission(payload.projectKey, 'ADMINISTER_PROJECTS'),
+    };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+resolver.define('saveGatePolicy', async ({ payload, context }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'ADMINISTER_PROJECTS');
+    if (denied) return { error: denied };
+    return { policy: await savePolicy(payload.projectKey, payload.policy, context && context.accountId) };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
 resolver.define('getFindings', async ({ payload }) => {
   try {
     const r = await sql

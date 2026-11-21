@@ -18,7 +18,7 @@ export function adfToText(node) {
 export async function scanIssue(projectKey, issueKey) {
     // 1. Read the issue from Jira.
     const res = await jiraGet(
-        route`/rest/api/3/issue/${issueKey}?fields=summary,description,comment,project`,
+        route`/rest/api/3/issue/${issueKey}?fields=summary,description,comment,project,fixVersions`,
         { asApp: true }
     );
     const issue = await json(res);
@@ -32,7 +32,7 @@ export async function scanIssue(projectKey, issueKey) {
     const d = await sql
         .prepare(
             `SELECT id, page_id, page_title, decision_text, status
-         FROM decisions WHERE project_key = ? AND status = 'active'`
+         FROM decisions WHERE project_key IN (?, '_site') AND status = 'active'`
         )
         .bindParams(projectKey)
         .execute();
@@ -106,6 +106,7 @@ export async function scanIssue(projectKey, issueKey) {
     return {
         issueKey,
         projectKey,
+        fixVersionIds: ((issue.fields.fixVersions) || []).map((v) => String(v.id)),
         decisionsChecked: d.rows.length,
         secretsFound: secrets.map((s) => ({ name: s.name, preview: s.preview })),
         matches: matches.map((m) => ({ decision: m.decision.page_title, shared: m.shared })),

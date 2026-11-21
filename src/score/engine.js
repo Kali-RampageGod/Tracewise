@@ -12,6 +12,9 @@ export const DEFAULT_CONFIG = {
   confirmedAt: 80, // >= 80: full points
   unclearAt: 40,   // 40-79: only 25% of points; below 40: zero
   unclearShare: 0.25,
+  // When true, an open confirmed critical (Highest/Blocker) gate finding forces Blocked.
+  // Off by default; the Release Gate turns it on from the project policy.
+  forceBlockGate: false,
   // score bands
   readyAt: 80,   // 80-100 = ready
   atRiskAt: 50,  // 50-79 = at_risk, below = blocked
@@ -33,6 +36,10 @@ export function computeScore(findings, config = DEFAULT_CONFIG) {
     // 2. A confirmed critical secret blocks the release, no matter the score.
     if (f.type === 'secret' && f.severity >= 4 && share === 1) {
       forcedBlock = 'Critical secret found';
+    }
+
+    if (f.type === 'gate' && f.severity >= 4 && share === 1 && config.forceBlockGate) {
+      forcedBlock = forcedBlock || 'Critical work item still open';
     }
 
     // 3. Points for this finding, limited by the cap for its type.
