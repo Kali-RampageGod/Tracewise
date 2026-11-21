@@ -6,6 +6,8 @@ import { makeConfluenceProcessor } from './confluence-processor';
 import { fetchPage, loadExisting, apply } from './confluence-store';
 import { assessRelease } from '../score/store';
 import { gate } from '../gate';
+import { makeSecretScanner } from '../secrets/page-sync';
+import { loadExistingSecrets, applySecrets } from '../secrets/page-store';
 
 export async function recordIngest(job, scanType) {
   await sql
@@ -21,6 +23,16 @@ export async function recordIngest(job, scanType) {
     .execute();
 }
 
+const scanSecrets = makeSecretScanner({ load: loadExistingSecrets, apply: applySecrets });
+
+// Page changes affect every project (decisions and page secrets are site-wide), so re-score the known ones.
+async function rescoreKnownProjects() {
+  const r = await sql
+    .prepare("SELECT DISTINCT project_key FROM release_assessments WHERE release_id = 'current' LIMIT 20")
+    .execute();
+  for (const row of r.rows) await assessRelease(row.project_key, 'current');
+}
+
 export const processors = {
   jira_issue: makeJiraProcessor({
     scanIssue,
@@ -28,5 +40,5 @@ export const processors = {
     gate: (projectKey, versionIds) => gate.refreshVersions(projectKey, versionIds),
     recordIngest,
   }),
-  confluence_page: makeConfluenceProcessor({ fetchPage, loadExisting, apply, recordIngest }),
+  confluence_page: makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSecrets, rescore: rescoreKnownProjects, recordIngest }),
 };

@@ -292,7 +292,7 @@ resolver.define('getFindings', async ({ payload }) => {
       .prepare(
         `SELECT id, type, severity, title, detail, redacted_preview, evidence_confidence, first_seen_at
            FROM findings
-          WHERE project_key = ? AND status = 'open'
+          WHERE project_key IN (?, '_site') AND status = 'open'
           ORDER BY severity DESC, first_seen_at DESC LIMIT 50`
       )
       .bindParams(payload.projectKey)

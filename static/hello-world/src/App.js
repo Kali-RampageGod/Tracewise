@@ -268,6 +268,9 @@ function ProjectPage({ projectKey }) {
   return (
     <div>
       <h2>TraceWise {projectKey ? `· ${projectKey}` : ''}</h2>
+      <p style={{ color: '#6b778c', margin: '0 0 8px' }}>
+        Detection may take a few minutes after a page or work item changes.
+      </p>
       <div style={{ marginBottom: 12 }}>
         {tabs.map((t) => (
           <button key={t} style={tabBtn(t === tab)} onClick={() => setTab(t)}>{t}</button>
@@ -308,9 +311,12 @@ function ProjectPage({ projectKey }) {
               <div>{sev[f.severity]} · {conf(f.evidence_confidence)} ({f.evidence_confidence}) · first seen {f.first_seen_at}</div>
               {f.detail && f.detail.shared && <div>Matched words: {f.detail.shared.join(', ')}</div>}
               {f.redacted_preview && <div>Found: <code>{f.redacted_preview}</code> (real value never stored)</div>}
+              {f.type === 'secret' && f.detail && f.detail.inCurrentVersion === false && (
+                <div>No longer in the current page, but it is still in the page history. Rotate it.</div>
+              )}
               {f.detail && f.detail.pageId && (
-                <a href="#" onClick={(e) => { e.preventDefault(); router.open('/wiki/pages/viewpage.action?pageId=' + f.detail.pageId); }}>
-                  Open the original decision: {f.detail.pageTitle}
+                <a href="#" onClick={(e) => { e.preventDefault(); openPage(f.detail.pageId); }}>
+                  {f.type === 'secret' ? 'Open the page' : 'Open the original decision'}: {f.detail.pageTitle}
                 </a>
               )}
             </div>

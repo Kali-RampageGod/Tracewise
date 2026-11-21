@@ -48,3 +48,13 @@ export function extractDecisions(storage) {
   }
   return out;
 }
+
+// Whole page as plain text, for secret scanning. Code macro bodies (CDATA) are kept:
+// that is where people paste keys and connection strings.
+export function pageText(storage) {
+  return decodeEntities(
+    String(storage || '')
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, c) => ' ' + c.replace(/</g, '‹') + ' ')
+      .replace(/<[^>]+>/g, ' ')
+  ).replace(/‹/g, '<').replace(/[ \t\r\f\v]+/g, ' ').trim();
+}

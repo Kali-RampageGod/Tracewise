@@ -10,7 +10,7 @@ export async function assessRelease(projectKey, releaseId, overrides = {}) {
         .prepare(
             `SELECT id, title, type, severity, status, evidence_confidence
          FROM findings
-        WHERE project_key = ? AND status = 'open'
+        WHERE project_key IN (?, '_site') AND status = 'open'
           AND (release_id = ? OR release_id IS NULL)`
         )
         .bindParams(projectKey, releaseId)
