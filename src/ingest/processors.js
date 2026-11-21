@@ -2,6 +2,7 @@ import sql from '@forge/sql';
 import { newId } from '../id';
 import { scanIssue } from '../decisions/scan';
 import { makeJiraProcessor } from './jira-processor';
+import { assessRelease } from '../score/store';
 
 export async function recordIngest(job, scanType) {
   await sql
@@ -18,6 +19,10 @@ export async function recordIngest(job, scanType) {
 }
 
 export const processors = {
-  jira_issue: makeJiraProcessor({ scanIssue, recordIngest }),
+  jira_issue: makeJiraProcessor({
+    scanIssue,
+    assess: (projectKey) => assessRelease(projectKey, 'current'),
+    recordIngest,
+  }),
   confluence_page: (job) => recordIngest(job, 'ingest_confluence'),
 };

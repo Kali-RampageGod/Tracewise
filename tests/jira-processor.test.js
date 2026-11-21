@@ -5,10 +5,11 @@ import { handleJob } from '../src/ingest/handler.js';
 
 const job = { sourceType: 'jira_issue', sourceId: '66400', sourceRef: 'TRAC-1', projectKey: 'TRAC', eventKey: 'jira:66400:cl:1', eventType: 'x' };
 
-function setup(scanImpl) {
+function setup(scanImpl, assessImpl) {
   const calls = [];
   const p = makeJiraProcessor({
     scanIssue: async (...a) => { calls.push(['scan', ...a]); if (scanImpl) return scanImpl(); },
+    assess: async (...a) => { calls.push(['assess', ...a]); if (assessImpl) return assessImpl(); },
     recordIngest: async (...a) => { calls.push(['record', a[0].eventKey, a[1]]); },
   });
   return { p, calls };
@@ -17,7 +18,7 @@ function setup(scanImpl) {
 test('scans the issue, then records ingest', async () => {
   const { p, calls } = setup();
   await p(job);
-  assert.deepEqual(calls, [['scan', 'TRAC', 'TRAC-1'], ['record', 'jira:66400:cl:1', 'ingest_jira']]);
+  assert.deepEqual(calls, [['scan', 'TRAC', 'TRAC-1'], ['assess', 'TRAC'], ['record', 'jira:66400:cl:1', 'ingest_jira']]);
 });
 
 test('deleted issue (404) is skipped but still recorded', async () => {
@@ -57,4 +58,22 @@ test('end to end with idempotency: same event twice scans once; failure then ret
   assert.equal((await handleJob(job, deps)).status, 'processed'); // retry works
   assert.equal((await handleJob(job, deps)).status, 'duplicate'); // redelivery skipped
   assert.equal(calls.filter((c) => c[0] === 'scan').length, 2);
+});
+
+test('re-scores using the project key the scan resolved when the job had none', async () => {
+  const { p, calls } = setup(() => ({ projectKey: 'ABC' }));
+  await p({ ...job, projectKey: null });
+  assert.deepEqual(calls.filter((c) => c[0] === 'assess'), [['assess', 'ABC']]);
+});
+
+test('deleted issue is not re-scored', async () => {
+  const { p, calls } = setup(() => { throw Object.assign(new Error('gone'), { status: 404 }); });
+  await p(job);
+  assert.equal(calls.filter((c) => c[0] === 'assess').length, 0);
+});
+
+test('a failing re-score is rethrown and nothing is recorded, so the job retries', async () => {
+  const { p, calls } = setup(null, () => { throw Object.assign(new Error('db busy'), { status: 503 }); });
+  await assert.rejects(() => p(job), /db busy/);
+  assert.equal(calls.filter((c) => c[0] === 'record').length, 0);
 });

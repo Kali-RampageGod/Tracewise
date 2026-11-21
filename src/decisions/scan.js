@@ -17,9 +17,12 @@ export function adfToText(node) {
 // Reads one Jira issue, matches it against active decisions, saves findings.
 export async function scanIssue(projectKey, issueKey) {
     // 1. Read the issue from Jira.
-const res = await jiraGet(route`/rest/api/3/issue/${issueKey}?fields=summary,description,comment,project`, { asApp: true });    
-const issue = await json(res);
-projectKey = projectKey || (issue.fields.project && issue.fields.project.key);
+    const res = await jiraGet(
+        route`/rest/api/3/issue/${issueKey}?fields=summary,description,comment,project`,
+        { asApp: true }
+    );
+    const issue = await json(res);
+    projectKey = projectKey || (issue.fields.project && issue.fields.project.key);
     const text = (issue.fields.summary || '') + ' ' + adfToText(issue.fields.description);
     const commentText = ((issue.fields.comment && issue.fields.comment.comments) || [])
         .map((c) => adfToText(c.body))
@@ -102,6 +105,7 @@ projectKey = projectKey || (issue.fields.project && issue.fields.project.key);
 
     return {
         issueKey,
+        projectKey,
         decisionsChecked: d.rows.length,
         secretsFound: secrets.map((s) => ({ name: s.name, preview: s.preview })),
         matches: matches.map((m) => ({ decision: m.decision.page_title, shared: m.shared })),
