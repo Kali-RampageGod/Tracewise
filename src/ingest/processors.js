@@ -6,8 +6,10 @@ import { makeConfluenceProcessor } from './confluence-processor';
 import { fetchPage, loadExisting, apply } from './confluence-store';
 import { assessRelease } from '../score/store';
 import { gate } from '../gate';
-import { makeSecretScanner } from '../secrets/page-sync';
-import { loadExistingSecrets, applySecrets } from '../secrets/page-store';
+import { scanPage } from '../secrets/source';
+import { queueHistory } from '../secrets/queue';
+import { remediate } from '../secrets/remediation-glue';
+import { processHistory } from '../secrets/history-glue';
 
 export async function recordIngest(job, scanType) {
   await sql
@@ -22,8 +24,6 @@ export async function recordIngest(job, scanType) {
     .bindParams(newId(), job.projectKey || '_unknown', scanType, String(job.occurredAt || 0))
     .execute();
 }
-
-const scanSecrets = makeSecretScanner({ load: loadExistingSecrets, apply: applySecrets });
 
 // Page changes affect every project (decisions and page secrets are site-wide), so re-score the known ones.
 async function rescoreKnownProjects() {
@@ -40,5 +40,14 @@ export const processors = {
     gate: (projectKey, versionIds) => gate.refreshVersions(projectKey, versionIds),
     recordIngest,
   }),
-  confluence_page: makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSecrets, rescore: rescoreKnownProjects, recordIngest }),
+  confluence_page: makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSecrets: scanPage, queueHistory, rescore: rescoreKnownProjects, recordIngest }),
+  confluence_history: async (job) => {
+    const r = await processHistory(job);
+    console.log('TW_HISTORY', job.sourceId, JSON.stringify({ scanned: r.scanned, remaining: r.remaining, opened: (r.opened || []).length }));
+    if (r.opened && r.opened.length) await rescoreKnownProjects();
+  },
+  secret_remediation: async (job) => {
+    const r = await remediate(job.sourceId);
+    console.log('TW_REMEDIATION', job.sourceId, JSON.stringify(r));
+  },
 };

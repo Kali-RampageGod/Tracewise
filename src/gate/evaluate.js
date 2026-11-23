@@ -14,9 +14,13 @@ const PRIORITY_SEVERITY = {
 // Unknown or missing priority counts as medium.
 export const severityFromPriority = (name) => PRIORITY_SEVERITY[String(name || '').toLowerCase()] ?? 2;
 
-export const isDone = (issue) =>
-  !!(issue && issue.fields && issue.fields.status && issue.fields.status.statusCategory &&
-     issue.fields.status.statusCategory.key === 'done');
+// Done means the Done status category, unless the policy lists the statuses that count.
+export const isDone = (issue, required = []) => {
+  const st = issue && issue.fields && issue.fields.status;
+  if (!st) return false;
+  if (required.length) return required.some((r) => r.toLowerCase() === String(st.name || '').toLowerCase());
+  return !!(st.statusCategory && st.statusCategory.key === 'done');
+};
 
 // Release notes are related-work links with the category "Release notes".
 export function findNotesLinks(relatedWork) {
@@ -39,10 +43,19 @@ const daysBetween = (isoDate, now) => {
 };
 
 const clip = (s, n = 200) => String(s || '').slice(0, n);
+// Whoever is working on the item, else whoever raised it.
+const ownerId = (issue) => {
+  const f = (issue && issue.fields) || {};
+  return (f.assignee && f.assignee.accountId) || (f.reporter && f.reporter.accountId) || null;
+};
 
-export function evaluateGate({ version, issues, truncated = false, notes, policy, now = new Date() }) {
+export function evaluateGate({ version, issues, truncated = false, notes, policy, now = new Date(), rules = [], criticalOpen = null }) {
+  const required = policy.requiredStatuses || [];
+  // Remediation issues made by Tracewise (label "tracewise") are the to-do for a finding that
+  // already costs points. Counting them again would penalize one problem twice.
+  issues = issues.filter((i) => !(((i.fields && i.fields.labels) || []).includes('tracewise')));
   const total = issues.length;
-  const unfinished = issues.filter((i) => !isDone(i));
+  const unfinished = issues.filter((i) => !isDone(i, required));
   const stats = { total, done: total - unfinished.length, unfinished: unfinished.length, truncated };
 
   if (version.released) {
@@ -57,22 +70,27 @@ export function evaluateGate({ version, issues, truncated = false, notes, policy
   const base = { type: 'gate', confidence: 100, sourceType: 'jira_issue' };
   const vInfo = { versionId: version.id, versionName: version.name };
 
+  const doneLabel = required.length ? `All work items are in a required state (${required.join(', ')})` : 'All work items are done';
+
   // 1. Unfinished work items.
   for (const i of unfinished) {
     const f = i.fields || {};
     findings.push({
       ...base, key: `unfinished:${i.key}`, sourceId: String(i.id),
       severity: severityFromPriority(f.priority && f.priority.name),
-      title: clip(`${i.key} is not done: ${f.summary || ''}`, 255),
+      title: clip(required.length
+        ? `${i.key} is "${(f.status && f.status.name) || 'unknown'}", not in a required state: ${f.summary || ''}`
+        : `${i.key} is not done: ${f.summary || ''}`, 255),
       detail: { kind: 'unfinished', issueKey: i.key, status: f.status && f.status.name,
-        priority: f.priority && f.priority.name, issueType: f.issuetype && f.issuetype.name, ...vInfo },
+        priority: f.priority && f.priority.name, issueType: f.issuetype && f.issuetype.name,
+        ownerAccountId: ownerId(i), ...vInfo },
     });
   }
   checks.push(unfinished.length === 0 && total > 0
-    ? { key: 'unfinished', label: 'All work items are done', status: 'pass', detail: `${total} of ${total} done` }
+    ? { key: 'unfinished', label: doneLabel, status: 'pass', detail: `${total} of ${total} ready` }
     : total === 0
       ? { key: 'unfinished', label: 'Work items are done', status: 'skipped', detail: 'No work items in this version' }
-      : { key: 'unfinished', label: 'All work items are done', status: 'fail', detail: `${unfinished.length} of ${total} not done` });
+      : { key: 'unfinished', label: doneLabel, status: 'fail', detail: `${unfinished.length} of ${total} not ready` });
 
   // 2. Blocked by another unfinished item.
   if (policy.flagBlockedLinks) {
@@ -87,7 +105,8 @@ export function evaluateGate({ version, issues, truncated = false, notes, policy
           ...base, key: `blocked:${i.key}:${other.key}`, sourceId: String(i.id), severity: 3,
           title: clip(`${i.key} is blocked by ${other.key}`, 255),
           detail: { kind: 'blocked', issueKey: i.key, blockedBy: other.key,
-            blockedByStatus: other.fields && other.fields.status && other.fields.status.name, ...vInfo },
+            blockedByStatus: other.fields && other.fields.status && other.fields.status.name,
+            ownerAccountId: ownerId(i), ...vInfo },
         });
       }
     }
@@ -162,6 +181,36 @@ export function evaluateGate({ version, issues, truncated = false, notes, policy
     } else {
       checks.push({ key: 'empty', label: 'Version has work items', status: 'pass', detail: `${total} work item${total > 1 ? 's' : ''}` });
     }
+  }
+
+  // 6. Custom rules: a work item that matches the rule's JQL is a problem.
+  for (const r of rules) {
+    const rule = r.rule;
+    if (r.error) {
+      checks.push({ key: `rule:${rule.id}`, label: rule.name, status: 'warn', detail: `This rule could not run: ${r.error}` });
+      continue;
+    }
+    for (const i of r.issues) {
+      const f = i.fields || {};
+      findings.push({
+        ...base, key: `rule:${rule.id}:${i.key}`, sourceId: String(i.id), severity: rule.severity,
+        title: clip(`${i.key}: ${rule.name}`, 255),
+        detail: { kind: 'rule', ruleId: rule.id, ruleName: rule.name, issueKey: i.key, status: f.status && f.status.name,
+          priority: f.priority && f.priority.name, ownerAccountId: ownerId(i), ...vInfo },
+      });
+    }
+    const n = r.issues.length;
+    checks.push(n === 0
+      ? { key: `rule:${rule.id}`, label: rule.name, status: 'pass', detail: 'No work item matches this rule' }
+      : { key: `rule:${rule.id}`, label: rule.name, status: 'fail', detail: `${n}${r.truncated ? '+' : ''} work item${n > 1 ? 's' : ''} match` });
+  }
+
+  // 7. Open critical findings elsewhere (a leaked secret, say). They already count in the score;
+  //    this row makes them visible in the gate. It adds no finding of its own.
+  if (policy.requireNoCriticalFindings && criticalOpen != null) {
+    checks.push(criticalOpen === 0
+      ? { key: 'critical', label: 'No open critical findings', status: 'pass', detail: 'Nothing critical is open' }
+      : { key: 'critical', label: 'No open critical findings', status: 'fail', detail: `${criticalOpen} open critical finding${criticalOpen > 1 ? 's' : ''}. See the Findings tab.` });
   }
 
   if (truncated) {

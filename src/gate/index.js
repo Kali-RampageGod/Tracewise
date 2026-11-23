@@ -1,11 +1,11 @@
 // Wires the Release Gate runner to Forge.
 import { makeGateRunner } from './runner';
-import { listVersions, readIssues, readRelatedWork, checkPage } from './jira';
-import { loadPolicy, syncFindings, trackedReleases } from './store';
+import { listVersions, readIssues, readRelatedWork, checkPage, readRuleIssues } from './jira';
+import { loadPolicy, syncFindings, trackedReleases, countCritical } from './store';
 import { assessRelease, getHistory } from '../score/store';
 
 export const gate = makeGateRunner({
-  listVersions, readIssues, readRelatedWork, checkPage, loadPolicy, syncFindings,
+  listVersions, readIssues, readRelatedWork, checkPage, loadPolicy, syncFindings, readRuleIssues, countCritical,
   assess: assessRelease, getHistory,
 });
 

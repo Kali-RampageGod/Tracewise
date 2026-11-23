@@ -48,7 +48,11 @@ function DecisionsTab({ projectKey }) {
           "We decided to use X instead of Y" or "We will not support Z". Edit a page, then wait for the next scan.
         </p>
       )}
-      {rows.map((d) => (
+      {rows.map((d) => d.restricted ? (
+        <div key={d.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
+          <RestrictedNote />
+        </div>
+      ) : (
         <div key={d.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
           <div><b>{d.text}</b></div>
           <div>
@@ -77,7 +81,7 @@ const checkIcon = { pass: '\u2714', fail: '\u2716', warn: '!', skipped: '\u2013'
 const checkColor = { pass: '#1f845a', fail: '#c9372c', warn: '#b38600', skipped: '#6b778c', info: '#6b778c' };
 const errText = (e) => String(e && e.message ? e.message : e);
 
-function GateTab({ projectKey }) {
+function GateTab({ projectKey, initialVersionId }) {
   const [releases, setReleases] = useState(null);
   const [versionId, setVersionId] = useState('');
   const [gate, setGate] = useState(null);
@@ -90,7 +94,8 @@ function GateTab({ projectKey }) {
       .then((r) => {
         if (r.error) { setErr(r.error); return; }
         setReleases(r.rows);
-        if (r.rows.length) setVersionId(r.rows[0].id);
+        const wanted = r.rows.find((v) => v.id === initialVersionId);
+        if (r.rows.length) setVersionId(wanted ? wanted.id : r.rows[0].id);
       })
       .catch((e) => setErr(errText(e)));
   }, [projectKey]);
@@ -104,6 +109,17 @@ function GateTab({ projectKey }) {
       .finally(() => setLoading(false));
   };
   useEffect(() => { if (versionId) check(versionId); }, [versionId]);
+
+  // Keep an open tab fresh: re-check quietly every minute, never while a check is running.
+  useEffect(() => {
+    if (!versionId) return undefined;
+    const t = setInterval(() => {
+      invoke('runGate', { projectKey, versionId })
+        .then((r) => { if (!r.error) setGate(r); })
+        .catch(() => {});
+    }, 60000);
+    return () => clearInterval(t);
+  }, [projectKey, versionId]);
 
   return (
     <div style={card}>
@@ -194,6 +210,7 @@ const POLICY_LABELS = {
   flagOverdue: 'Flag versions whose release date has passed',
   flagEmptyRelease: 'Flag versions with no work items',
   blockOnCriticalIssue: 'An unfinished Highest or Blocker work item forces the verdict to Blocked',
+  requireNoCriticalFindings: 'Open critical findings (such as a leaked secret) fail the gate',
 };
 
 function PolicyCard({ projectKey }) {
@@ -206,6 +223,8 @@ function PolicyCard({ projectKey }) {
       .then((r) => { setState(r); if (r.policy) setPolicy(r.policy); })
       .catch((e) => setState({ error: errText(e) }));
   }, [projectKey]);
+
+  const setRule = (i, patch) => setPolicy({ ...policy, customRules: policy.customRules.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
 
   const save = () => {
     setMsg('Saving...');
@@ -230,6 +249,31 @@ function PolicyCard({ projectKey }) {
               </label>
             </div>
           ))}
+          <div style={{ marginTop: 8 }}>
+            <label>Required states (comma separated, empty means the Done category):{' '}
+              <input style={{ width: 260 }} disabled={!state.canEdit} placeholder="Done, Released"
+                value={(policy.requiredStatuses || []).join(', ')}
+                onChange={(e) => setPolicy({ ...policy, requiredStatuses: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+            </label>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <b>Custom rules</b> (a work item of the version that matches the JQL is a problem)
+            {(policy.customRules || []).map((r, i) => (
+              <div key={i} style={{ margin: '4px 0' }}>
+                <input style={{ width: 150 }} placeholder="Name" disabled={!state.canEdit} value={r.name}
+                  onChange={(e) => setRule(i, { name: e.target.value })} />{' '}
+                <input style={{ width: 280 }} placeholder='JQL, for example labels = "needs-qa"' disabled={!state.canEdit} value={r.jql}
+                  onChange={(e) => setRule(i, { jql: e.target.value })} />{' '}
+                <select disabled={!state.canEdit} value={r.severity || 3} onChange={(e) => setRule(i, { severity: Number(e.target.value) })}>
+                  <option value={1}>Low</option><option value={2}>Medium</option><option value={3}>High</option><option value={4}>Critical</option>
+                </select>{' '}
+                {state.canEdit && <button onClick={() => setPolicy({ ...policy, customRules: policy.customRules.filter((_, j) => j !== i) })}>Remove</button>}
+              </div>
+            ))}
+            {state.canEdit && (policy.customRules || []).length < 5 && (
+              <button onClick={() => setPolicy({ ...policy, customRules: [...(policy.customRules || []), { name: '', jql: '', severity: 3 }] })}>Add rule</button>
+            )}
+          </div>
           {state.canEdit
             ? <p><button onClick={save}>Save policy</button> {msg}</p>
             : <p>Only project administrators can change the policy.</p>}
@@ -239,28 +283,271 @@ function PolicyCard({ projectKey }) {
   );
 }
 
+const SEV = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
+const confWord = (c) => (Number(c) >= 80 ? 'confirmed' : Number(c) >= 40 ? 'unclear' : 'weak');
+const DISMISS_CODES = [
+  ['false_positive', 'Not a real secret'],
+  ['test_data', 'Test or sample data'],
+  ['accepted_risk', 'Risk accepted'],
+];
+
+function SecretActions({ f, projectKey, onDone }) {
+  const [mode, setMode] = useState(null);
+  const [reason, setReason] = useState('');
+  const [code, setCode] = useState('false_positive');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const labels = {
+    confirm_rotation: 'Confirm that the credential was rotated or revoked',
+    dismiss: 'Dismiss this finding',
+    allow_value: 'Never report this exact value again',
+    allow_source: 'Never report anything from this page or work item again',
+  };
+  const submit = () => {
+    setBusy(true);
+    setErr(null);
+    invoke('secretAction', { projectKey, findingId: f.id, action: mode, reason, code })
+      .then((r) => { if (r.error) setErr(r.error); else onDone(); })
+      .catch((e) => setErr(errText(e)))
+      .finally(() => setBusy(false));
+  };
+  if (!mode) {
+    return (
+      <div style={{ marginTop: 6 }}>
+        <button style={tabBtn(false)} onClick={() => setMode('confirm_rotation')}>Confirm rotated</button>
+        <button style={tabBtn(false)} onClick={() => setMode('dismiss')}>Dismiss</button>
+        <button style={tabBtn(false)} onClick={() => setMode('allow_value')}>Allow this value</button>
+        <button style={tabBtn(false)} onClick={() => setMode('allow_source')}>Allow this source</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div><b>{labels[mode]}</b></div>
+      {mode === 'dismiss' && (
+        <select value={code} onChange={(e) => setCode(e.target.value)}>
+          {DISMISS_CODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      )}{' '}
+      <input style={{ width: 280 }} placeholder="Reason (required)" value={reason} onChange={(e) => setReason(e.target.value)} />{' '}
+      <button disabled={busy || reason.trim().length < 3} onClick={submit}>Save</button>{' '}
+      <button disabled={busy} onClick={() => { setMode(null); setErr(null); }}>Cancel</button>
+      {err && <div style={{ color: '#c9372c' }}>Error: {err}</div>}
+    </div>
+  );
+}
+
+function FindingsTab({ projectKey }) {
+  const [view, setView] = useState('open');
+  const [fl, setFl] = useState(null);
+  const load = () => {
+    if (!projectKey) return;
+    invoke('getFindings', { projectKey, status: view })
+      .then(setFl)
+      .catch((e) => setFl({ error: errText(e) }));
+  };
+  useEffect(() => { setFl(null); load(); }, [projectKey, view]);
+
+  return (
+    <div style={card}>
+      <b>Findings</b>
+      <div style={{ margin: '8px 0' }}>
+        <button style={tabBtn(view === 'open')} onClick={() => setView('open')}>Open</button>
+        <button style={tabBtn(view === 'closed')} onClick={() => setView('closed')}>Closed</button>
+      </div>
+      {!fl && <p>Loading...</p>}
+      {fl && fl.error && <p>Error: {fl.error}</p>}
+      {fl && !fl.error && fl.rows.length === 0 && <p>{view === 'open' ? 'No open findings.' : 'No closed findings.'}</p>}
+      {fl && !fl.error && fl.rows.map((f) => {
+        if (f.restricted) {
+          return (
+            <div key={f.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
+              <div>{SEV[f.severity]} · open {f.ageText || 'unknown'}</div>
+              <RestrictedNote />
+            </div>
+          );
+        }
+        const d = f.detail || {};
+        return (
+          <div key={f.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
+            <div><b>{f.title}</b></div>
+            <div style={{ color: '#6b778c' }}>Owner: {f.ownerName || 'unknown'} · open {f.ageText || 'unknown'}</div>
+            <div>
+              {SEV[f.severity]} · {confWord(f.evidence_confidence)} ({f.evidence_confidence}) · first seen {f.first_seen_at}
+              {f.status !== 'open' ? ` · ${f.status === 'resolved' ? 'rotation confirmed' : 'dismissed'} ${f.resolved_at || ''}` : ''}
+            </div>
+            {d.shared && <div>Matched words: {d.shared.join(', ')}</div>}
+            {f.redacted_preview && <div>Found: <code>{f.redacted_preview}</code> (real value never stored)</div>}
+            {f.type === 'secret' && d.historyOnly && (
+              <div>Only in page version {d.foundInVersion}, not in the current page. It is still exposed in the history. Rotate it.</div>
+            )}
+            {f.type === 'secret' && !d.historyOnly && d.inCurrentVersion === false && (
+              <div>No longer in the current text, but it is still in the history. Rotate it.</div>
+            )}
+            {d.pageId && (
+              <a href="#" onClick={(e) => { e.preventDefault(); openPage(d.pageId); }}>
+                {f.type === 'secret' ? 'Open the page' : 'Open the original decision'}: {d.pageTitle}
+              </a>
+            )}
+            {f.link && f.link.kind !== 'page' && (
+              <div>
+                <a href="#" onClick={(e) => { e.preventDefault(); openLink(f.link, projectKey); }}>{linkText(f.link)}</a>
+              </div>
+            )}
+            {f.type === 'secret' && f.remediation_issue_key && (
+              <div>
+                Remediation issue:{' '}
+                <a href="#" onClick={(e) => { e.preventDefault(); router.open('/browse/' + f.remediation_issue_key); }}>{f.remediation_issue_key}</a>
+              </div>
+            )}
+            {f.type === 'secret' && !f.remediation_issue_key && f.status === 'open' && (
+              <div style={{ color: '#6b778c' }}>No remediation issue yet. Choose a project for them in Space settings.</div>
+            )}
+            {f.type === 'secret' && f.status === 'open' && <SecretActions f={f} projectKey={projectKey} onDone={load} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RemediationCard({ projectKey }) {
+  const [state, setState] = useState(null);
+  const [target, setTarget] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    if (!projectKey) return;
+    invoke('getRemediationConfig', { projectKey })
+      .then((r) => {
+        setState(r);
+        if (r.config) { setTarget(r.config.projectKey || projectKey); setEnabled(!!r.config.enabled); }
+      })
+      .catch((e) => setState({ error: errText(e) }));
+  }, [projectKey]);
+  const save = () => {
+    setMsg('Saving...');
+    invoke('saveRemediationConfig', { projectKey, targetProject: target, enabled })
+      .then((r) => setMsg(r.error ? 'Error: ' + r.error : r.queued ? `Saved. Creating ${r.queued} issue${r.queued > 1 ? 's' : ''} for open findings.` : 'Saved.'))
+      .catch((e) => setMsg('Error: ' + errText(e)));
+  };
+  return (
+    <div style={card}>
+      <b>Secret remediation</b>
+      <p>When Tracewise finds a secret, it creates one Jira work item that asks the owner to rotate it. The owner is assigned and mentioned.</p>
+      {!state && <p>Loading...</p>}
+      {state && state.error && <p>Error: {state.error}</p>}
+      {state && !state.error && (
+        <div>
+          <label>
+            <input type="checkbox" checked={enabled} disabled={!state.canEdit} onChange={(e) => setEnabled(e.target.checked)} />{' '}
+            Create remediation issues
+          </label>
+          <div style={{ margin: '6px 0' }}>
+            Project key for the issues:{' '}
+            <input style={{ width: 90 }} value={target} disabled={!state.canEdit} onChange={(e) => setTarget(e.target.value)} />
+          </div>
+          {state.canEdit
+            ? <p><button onClick={save}>Save</button> {msg}</p>
+            : <p>Only project administrators can change this.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const openLink = (link, projectKey) => {
+  if (!link) return;
+  if (link.kind === 'page') openPage(link.id);
+  else if (link.kind === 'issue') router.open('/browse/' + link.key);
+  else router.open(`/projects/${projectKey}/versions/${link.id}`);
+};
+const linkText = (link) =>
+  link.kind === 'page' ? `Open page: ${link.label}` : link.kind === 'issue' ? `Open ${link.key}` : `Open version ${link.label}`;
+
+function RestrictedNote() {
+  return (
+    <div>
+      <span style={{ background: '#dfe1e6', borderRadius: 3, padding: '1px 6px', fontWeight: 600 }}>Restricted</span>{' '}
+      You cannot open the source of this item, so its details are hidden. Ask its owner for access.
+    </div>
+  );
+}
+
+function OverviewTab({ projectKey, onOpenRelease }) {
+  const [ov, setOv] = useState(null);
+  useEffect(() => {
+    if (!projectKey) return;
+    invoke('getOverview', { projectKey })
+      .then(setOv)
+      .catch((e) => setOv({ error: errText(e) }));
+  }, [projectKey]);
+
+  return (
+    <div>
+      <div style={card}>
+        <b>Release confidence score</b>
+        {!ov && <p>Loading...</p>}
+        {ov && ov.error && <p>Error: {ov.error}</p>}
+        {ov && ov.empty && <p>No assessment yet.</p>}
+        {ov && !ov.empty && !ov.error && (
+          <div>
+            <div style={{ fontSize: 48, fontWeight: 700, color: bandColor[ov.current.band] }}>{ov.current.score}</div>
+            <div style={{ fontWeight: 600, color: bandColor[ov.current.band] }}>{bandLabel[ov.current.band] || ov.current.band}</div>
+            {ov.current.blockedReason && <p>Reason: {ov.current.blockedReason}</p>}
+            <p style={{ color: '#6b778c' }}>
+              {ov.current.openFindings} open finding{ov.current.openFindings === 1 ? '' : 's'} · updated {ov.current.computedAt}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {ov && !ov.empty && !ov.error && (
+        <div style={card}>
+          <b>What holds the score down</b>
+          {ov.rows.length === 0 && <p>Nothing. No open findings deduct points.</p>}
+          {ov.rows.map((r, i) => (
+            <div key={r.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
+              <div>
+                <b>{i + 1}. -{r.points}</b> · {sevLabel[r.severity]}{r.reason && r.reason !== 'confirmed' ? ` · ${r.reason}` : ''}
+              </div>
+              {r.restricted ? <RestrictedNote /> : (
+                <div>
+                  <div>{r.title}</div>
+                  <div style={{ color: '#6b778c' }}>
+                    Owner: {r.owner || 'unknown'} · open {r.ageText || 'unknown'}
+                    {r.preview ? <span> · found <code>{r.preview}</code></span> : null}
+                  </div>
+                  {r.link && (
+                    <a href="#" onClick={(e) => { e.preventDefault(); openLink(r.link, projectKey); }}>{linkText(r.link)}</a>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {ov && !ov.empty && !ov.error && ov.releases.length > 0 && (
+        <div style={card}>
+          <b>Releases</b>
+          {ov.releases.map((v) => (
+            <div key={v.id} style={{ borderTop: '1px solid #ddd', padding: '6px 0' }}>
+              <b>{v.name}</b> · <span style={{ color: bandColor[v.band], fontWeight: 600 }}>{bandLabel[v.band] || v.band} {v.score}</span>
+              {v.blockedReason ? ` · ${v.blockedReason}` : ''}{' '}
+              <a href="#" onClick={(e) => { e.preventDefault(); onOpenRelease(v.id); }}>Open gate</a>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectPage({ projectKey }) {
   const tabs = ['Overview', 'Decisions', 'Findings', 'Release gate'];
   const [tab, setTab] = useState('Overview');
-  const [ov, setOv] = useState(null);
-
-  // Load the latest score whenever the Overview tab is opened.
-  useEffect(() => {
-    if (!projectKey || tab !== 'Overview') return;
-    invoke('getOverview', { projectKey })
-      .then(setOv)
-      .catch((e) => setOv({ error: String(e && e.message ? e.message : e) }));
-  }, [projectKey, tab]);
-
-  const [fl, setFl] = useState(null);
-  useEffect(() => {
-    if (!projectKey || tab !== 'Findings') return;
-    invoke('getFindings', { projectKey })
-      .then(setFl)
-      .catch((e) => setFl({ error: String(e && e.message ? e.message : e) }));
-  }, [projectKey, tab]);
-  const sev = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
-  const conf = (c) => (Number(c) >= 80 ? 'confirmed' : Number(c) >= 40 ? 'unclear' : 'weak');
+  const [gateVersion, setGateVersion] = useState('');
 
   const color = { ready: '#1f845a', at_risk: '#b38600', blocked: '#c9372c' };
   const label = { ready: 'Ready', at_risk: 'At risk', blocked: 'Blocked' };
@@ -277,53 +564,11 @@ function ProjectPage({ projectKey }) {
         ))}
       </div>
       {tab === 'Overview' && (
-        <div style={card}>
-          <b>Release confidence score</b>
-          {!ov && <p>Loading...</p>}
-          {ov && ov.error && <p>Error: {ov.error}</p>}
-          {ov && ov.empty && <p>No assessment yet.</p>}
-          {ov && !ov.empty && !ov.error && (
-            <div>
-              <div style={{ fontSize: 48, fontWeight: 700, color: color[ov.band] }}>{ov.score}</div>
-              <div style={{ fontWeight: 600, color: color[ov.band] }}>{label[ov.band] || ov.band}</div>
-              {ov.blocked_reason && <p>Reason: {ov.blocked_reason}</p>}
-              <p>{ov.open_findings} open findings · release {ov.release_id} · {ov.computed_at}</p>
-              <b>Where the points went</b>
-              <ul>
-                {ov.breakdown.map((b) => (
-                  <li key={b.finding_id}>-{b.points}: {b.title} ({b.reason})</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+        <OverviewTab projectKey={projectKey} onOpenRelease={(id) => { setGateVersion(id); setTab('Release gate'); }} />
       )}
       {tab === 'Decisions' && <DecisionsTab projectKey={projectKey} />}
-      {tab === 'Findings' && (
-        <div style={card}>
-          <b>Open findings</b>
-          {!fl && <p>Loading...</p>}
-          {fl && fl.error && <p>Error: {fl.error}</p>}
-          {fl && !fl.error && fl.rows.length === 0 && <p>No open findings.</p>}
-          {fl && !fl.error && fl.rows.map((f) => (
-            <div key={f.id} style={{ borderTop: '1px solid #ddd', padding: '8px 0' }}>
-              <div><b>{f.title}</b></div>
-              <div>{sev[f.severity]} · {conf(f.evidence_confidence)} ({f.evidence_confidence}) · first seen {f.first_seen_at}</div>
-              {f.detail && f.detail.shared && <div>Matched words: {f.detail.shared.join(', ')}</div>}
-              {f.redacted_preview && <div>Found: <code>{f.redacted_preview}</code> (real value never stored)</div>}
-              {f.type === 'secret' && f.detail && f.detail.inCurrentVersion === false && (
-                <div>No longer in the current page, but it is still in the page history. Rotate it.</div>
-              )}
-              {f.detail && f.detail.pageId && (
-                <a href="#" onClick={(e) => { e.preventDefault(); openPage(f.detail.pageId); }}>
-                  {f.type === 'secret' ? 'Open the page' : 'Open the original decision'}: {f.detail.pageTitle}
-                </a>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {tab === 'Release gate' && <GateTab projectKey={projectKey} />}
+      {tab === 'Findings' && <FindingsTab projectKey={projectKey} />}
+      {tab === 'Release gate' && <GateTab projectKey={projectKey} initialVersionId={gateVersion} />}
     </div>
   );
 }
@@ -344,6 +589,7 @@ function SettingsPage({ projectKey }) {
     <div>
       <h2>TraceWise settings {projectKey ? `· ${projectKey}` : ''}</h2>
       <PolicyCard projectKey={projectKey} />
+      <RemediationCard projectKey={projectKey} />
       <div style={card}>
         <b>Database</b>
         <div>

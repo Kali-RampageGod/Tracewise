@@ -4,7 +4,11 @@ import { evaluateGate, findNotesLinks } from './evaluate.js';
 
 export const isVersionId = (v) => /^\d{1,12}$/.test(String(v || ''));
 
-export function makeGateRunner({ listVersions, readIssues, readRelatedWork, checkPage, loadPolicy, syncFindings, assess, getHistory, now = () => new Date() }) {
+export function makeGateRunner({
+  listVersions, readIssues, readRelatedWork, checkPage, loadPolicy, syncFindings, assess, getHistory,
+  readRuleIssues = async () => ({ issues: [], truncated: false }), countCritical = async () => null,
+  now = () => new Date(),
+}) {
   async function evaluateVersion(projectKey, version) {
     const policy = await loadPolicy(projectKey);
     let result;
@@ -22,7 +26,19 @@ export function makeGateRunner({ listVersions, readIssues, readRelatedWork, chec
         }
         notes = { links, pageState };
       }
-      result = evaluateGate({ version, issues, truncated, notes, policy, now: now() });
+      // A rule with a broken JQL is reported on its own row. Anything else (rate limit, outage) stops the run.
+      const rules = [];
+      for (const rule of policy.customRules || []) {
+        try {
+          const r = await readRuleIssues(version.id, rule.jql);
+          rules.push({ rule, issues: r.issues, truncated: r.truncated });
+        } catch (e) {
+          if (e && e.status === 400) rules.push({ rule, issues: [], error: 'the JQL is not valid for this project' });
+          else throw e;
+        }
+      }
+      const criticalOpen = policy.requireNoCriticalFindings ? await countCritical(projectKey, String(version.id)) : null;
+      result = evaluateGate({ version, issues, truncated, notes, policy, now: now(), rules, criticalOpen });
     }
     await syncFindings(projectKey, version.id, result.findings);
     const score = await assess(projectKey, String(version.id), { forceBlockGate: policy.blockOnCriticalIssue });

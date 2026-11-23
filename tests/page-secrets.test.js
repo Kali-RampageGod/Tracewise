@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pageText } from '../src/decisions/extract.js';
-import { planPageSecrets, makeSecretScanner } from '../src/secrets/page-sync.js';
+import { planSecretSync as planPageSecrets, makeSecretScanner } from '../src/secrets/sync.js';
 import { makeConfluenceProcessor } from '../src/ingest/confluence-processor.js';
 
 const S = (fp, name = 'AWS Access Key') => ({ name, severity: 4, fingerprint: fp, preview: 'AKIA****MPLE' });
@@ -56,9 +56,9 @@ test('scanner: loads, plans, applies, reports', async () => {
     apply: async (plan, ctx) => { calls.push('apply'); seen.ctx = ctx; },
     find: () => [S('a')],
   });
-  const r = await scan({ pageId: '7', title: 'T', version: 3, text: 'x' });
+  const r = await scan({ sourceType: 'confluence_page', sourceId: '7', pageId: '7', title: 'T', version: 3, text: 'x' });
   assert.deepEqual(calls, ['load', 'apply']);
-  assert.deepEqual(r, { changed: true, found: 1 });
+  assert.deepEqual(r, { changed: true, found: 1, opened: [] });
   assert.equal(seen.ctx.version, 3);
 });
 

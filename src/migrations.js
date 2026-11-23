@@ -107,6 +107,20 @@ const RELEASE_ASSESSMENTS = `CREATE TABLE release_assessments (
   INDEX idx_ra_release (project_key, release_id, computed_at)
 )`;
 
+const FINDINGS_REMEDIATION = `ALTER TABLE findings
+  ADD COLUMN remediation_issue_key VARCHAR(32) NULL,
+  ADD COLUMN remediation_claimed_at DATETIME NULL`;
+
+const SECRET_ALLOWLIST = `CREATE TABLE secret_allowlist (
+  id CHAR(36) PRIMARY KEY,
+  scope VARCHAR(16) NOT NULL,
+  value VARCHAR(255) NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  created_by VARCHAR(128) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_allow (scope, value)
+)`;
+
 const migrations = migrationRunner
   .enqueue('v002_create_decisions', DECISIONS)
   .enqueue('v003_create_findings', FINDINGS)
@@ -115,7 +129,9 @@ const migrations = migrationRunner
   .enqueue('v006_create_scan_state', SCAN_STATE)
   .enqueue('v007_create_decision_feedback', DECISION_FEEDBACK)
   .enqueue('v008_create_project_rules', PROJECT_RULES)
-  .enqueue('v009_create_release_assessments', RELEASE_ASSESSMENTS);
+  .enqueue('v009_create_release_assessments', RELEASE_ASSESSMENTS)
+  .enqueue('v010_findings_remediation', FINDINGS_REMEDIATION)
+  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST);
 
 export const runMigration = async () => {
   const applied = await migrations.run();

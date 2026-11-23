@@ -84,6 +84,7 @@ permissions:
     - read:page:confluence
     - read:confluence-content.summary
     - read:jira-work
+    - write:jira-work
 app:
   runtime:
     name: nodejs24.x

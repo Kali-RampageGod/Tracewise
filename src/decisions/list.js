@@ -42,3 +42,13 @@ export function shapeDecisions(rows, replacements, findings) {
     }),
   };
 }
+
+// Hides decisions from pages the viewer cannot open. access: Map('page:<id>' -> 'ok' | 'no').
+export function maskDecisions(rows, access) {
+  return rows.map((r) =>
+    access.get('page:' + r.pageId) === 'ok'
+      ? { ...r, restricted: false }
+      : { id: r.id, status: r.status, restricted: true, text: 'Restricted decision', pageId: null, pageTitle: null,
+          pageVersion: null, decidedAt: null, replacedBy: null, conflicts: [] }
+  );
+}

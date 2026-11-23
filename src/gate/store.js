@@ -98,3 +98,17 @@ export async function trackedReleases(limit = 10) {
     .execute();
   return r.rows;
 }
+
+// Open critical findings that count against a release: secrets and decision conflicts of the
+// project or the site, plus anything tied to this release. Gate findings are not counted twice.
+export async function countCritical(projectKey, releaseId) {
+  const r = await sql
+    .prepare(
+      `SELECT COUNT(*) AS n FROM findings
+        WHERE project_key IN (?, '_site') AND status = 'open' AND severity >= 4
+          AND type <> 'gate' AND (release_id IS NULL OR release_id = ?)`
+    )
+    .bindParams(projectKey, String(releaseId))
+    .execute();
+  return Number(r.rows[0].n);
+}

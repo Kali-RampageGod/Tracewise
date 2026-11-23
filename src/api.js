@@ -22,3 +22,11 @@ export async function json(res) {
   if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.json();
 }
+// `path` must be a route`...` template from @forge/api, like every Forge request.
+// Writes are never retried automatically: a retry after a lost response could create a duplicate.
+export const jiraWrite = (path, { method = 'POST', body } = {}) =>
+  api.asApp().requestJira(path, {
+    method,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });

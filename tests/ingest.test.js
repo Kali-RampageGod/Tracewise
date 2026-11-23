@@ -88,3 +88,14 @@ test('retry classification and backoff', () => {
   assert.equal(isRetriable({ status: 400, message: 'bad' }), false);
   assert.deepEqual([0, 1, 2, 3, 10].map(retryDelaySeconds), [30, 60, 120, 240, 900]);
 });
+import { retryPlan } from '../src/ingest/handler.js';
+test('retryPlan: always carries retryData, backs off, and marks rate limits', () => {
+  const p0 = retryPlan(new Error('timeout'), 0);
+  assert.equal(p0.retryAfter, 30);
+  assert.equal(p0.reason, 'FUNCTION_RETRY_REQUEST');
+  assert.deepEqual(p0.retryData, { attempt: 1 });
+  assert.equal(retryPlan(Object.assign(new Error('x'), { status: 429 }), 2).reason, 'FUNCTION_UPSTREAM_RATE_LIMITED');
+  assert.equal(retryPlan(new Error('x'), 2).retryAfter, 120);
+  assert.deepEqual(retryPlan(new Error('x'), undefined).retryData, { attempt: 1 });
+  assert.ok(retryPlan(new Error('x'), 30).retryAfter <= 900);
+});

@@ -8,9 +8,18 @@ import { newId } from './id';
 import { createHash } from 'crypto';
 import { scanIssue } from './decisions/scan';
 import sql from '@forge/sql';
-import { gate } from './gate';
-import { listVersions, hasPermission } from './gate/jira';
+import { gate, refreshTrackedGates } from './gate';
+import { listVersions, hasPermission, validateRules } from './gate/jira';
+import { normalizePolicy } from './gate/policy';
 import { loadPolicy, savePolicy } from './gate/store';
+import { performSecretAction } from './secrets/actions';
+import { backfillRemediation } from './secrets/rescan';
+import { getConfig as getRemediationConfig } from './secrets/remediation-glue';
+import { jiraGet, json } from './api';
+import { checkAccess } from './overview/access';
+import { displayNames } from './overview/people';
+import { sourcesOf, ownerIdsOf, buildDeductionRows, latestPerRelease, presentFinding } from './overview/rows';
+import { maskDecisions } from './decisions/list';
 import { PAGE_SIZE, parseStatus, shapeDecisions } from './decisions/list';
 const resolver = new Resolver();
 
@@ -127,20 +136,66 @@ resolver.define('scoreDemoClear', async ({ payload }) => {
 });
 
 // Dashboard: latest saved score for a project (any release).
+const AGE_SQL = 'TIMESTAMPDIFF(HOUR, first_seen_at, CURRENT_TIMESTAMP) AS age_hours';
+const parseDetail = (f) => {
+  let detail = null;
+  try { detail = f.detail ? JSON.parse(f.detail) : null; } catch (e) { /* keep null */ }
+  return { ...f, detail };
+};
+
+// The project's current score, what holds it down (ranked), and the latest score of each release.
 resolver.define('getOverview', async ({ payload }) => {
   try {
-    const r = await sql
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    const projectKey = payload.projectKey;
+
+    await assessRelease(projectKey, 'current'); // refresh first; saves only if something changed
+    const cur = (await sql
       .prepare(
-        `SELECT release_id, score, band, blocked_reason, open_findings, breakdown, computed_at
-           FROM release_assessments
-          WHERE project_key = ?
+        `SELECT score, band, blocked_reason, open_findings, breakdown, computed_at
+           FROM release_assessments WHERE project_key = ? AND release_id = 'current'
           ORDER BY computed_at DESC LIMIT 1`
       )
-      .bindParams(payload.projectKey)
+      .bindParams(projectKey)
+      .execute()).rows[0];
+    if (!cur) return { empty: true };
+
+    const breakdown = JSON.parse(cur.breakdown);
+    let findings = [];
+    if (breakdown.length) {
+      const ids = breakdown.map((b) => b.finding_id);
+      const r = await sql
+        .prepare(
+          `SELECT id, type, severity, status, title, detail, redacted_preview, source_type, source_id, ${AGE_SQL}
+             FROM findings WHERE id IN (${ids.map(() => '?').join(',')}) AND status = 'open'`
+        )
+        .bindParams(...ids)
+        .execute();
+      findings = r.rows.map(parseDetail);
+    }
+    const access = await checkAccess(findings.flatMap(sourcesOf));
+    const names = await displayNames(ownerIdsOf(findings, access));
+    const rows = buildDeductionRows({ breakdown, findings, access, names });
+
+    const history = await sql
+      .prepare(
+        `SELECT release_id, score, band, blocked_reason, computed_at FROM release_assessments
+          WHERE project_key = ? AND release_id REGEXP '^[0-9]+$' ORDER BY computed_at DESC LIMIT 60`
+      )
+      .bindParams(projectKey)
       .execute();
-    const row = r.rows[0];
-    if (!row) return { empty: true };
-    return { empty: false, ...row, breakdown: JSON.parse(row.breakdown) };
+    const versions = new Map((await listVersions(projectKey)).map((v) => [String(v.id), v.name]));
+
+    return {
+      empty: false,
+      current: {
+        score: Number(cur.score), band: cur.band, blockedReason: cur.blocked_reason,
+        openFindings: Number(cur.open_findings), computedAt: cur.computed_at,
+      },
+      rows,
+      releases: latestPerRelease(history.rows, versions),
+    };
   } catch (e) {
     return { error: describe(e) };
   }
@@ -195,6 +250,8 @@ resolver.define('decisionDemoScan', async ({ payload }) => {
 // Findings tab: open findings of a project, worst first.
 resolver.define('getDecisions', async ({ payload }) => {
   try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
     const status = parseStatus(payload.status);
     const offset = Math.max(0, Number(payload.offset) || 0);
     const where = status === 'all' ? '' : 'AND status = ?';
@@ -222,7 +279,9 @@ resolver.define('getDecisions', async ({ payload }) => {
       .prepare("SELECT title, detail FROM findings WHERE project_key = ? AND type = 'decision_conflict' AND status = 'open' LIMIT 500")
       .bindParams(payload.projectKey)
       .execute();
-    return shapeDecisions(r.rows, replacements, f.rows);
+    const shaped = shapeDecisions(r.rows, replacements, f.rows);
+    const access = await checkAccess(shaped.rows.map((d) => ({ kind: 'page', id: String(d.pageId) })));
+    return { ...shaped, rows: maskDecisions(shaped.rows, access) };
   } catch (e) {
     return { error: describe(e) };
   }
@@ -280,7 +339,14 @@ resolver.define('saveGatePolicy', async ({ payload, context }) => {
   try {
     const denied = await guard(payload.projectKey, 'ADMINISTER_PROJECTS');
     if (denied) return { error: denied };
-    return { policy: await savePolicy(payload.projectKey, payload.policy, context && context.accountId) };
+    // Check the rules' JQL with Jira's parser before saving, so a typo is caught here.
+    const clean = normalizePolicy(payload.policy);
+    const problems = await validateRules(clean.customRules);
+    if (problems.length) return { error: problems.join(' ') };
+    const saved = await savePolicy(payload.projectKey, clean, context && context.accountId);
+    // Release verdicts follow the new rules without waiting for the next hourly scan.
+    refreshTrackedGates(15000).catch((e) => console.log('TW_GATE_REFRESH_ERROR', e.message));
+    return { policy: saved };
   } catch (e) {
     return { error: describe(e) };
   }
@@ -288,21 +354,80 @@ resolver.define('saveGatePolicy', async ({ payload, context }) => {
 
 resolver.define('getFindings', async ({ payload }) => {
   try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    // 'open' (default) or 'closed' (resolved or dismissed) for the audit view.
+    const closed = payload.status === 'closed';
     const r = await sql
       .prepare(
-        `SELECT id, type, severity, title, detail, redacted_preview, evidence_confidence, first_seen_at
+        `SELECT id, type, severity, status, title, detail, redacted_preview, evidence_confidence,
+                first_seen_at, resolved_at, remediation_issue_key, source_type, source_id, ${AGE_SQL}
            FROM findings
-          WHERE project_key IN (?, '_site') AND status = 'open'
+          WHERE project_key IN (?, '_site') AND status ${closed ? "IN ('resolved', 'dismissed')" : "= 'open'"}
           ORDER BY severity DESC, first_seen_at DESC LIMIT 50`
       )
       .bindParams(payload.projectKey)
       .execute();
-    const rows = r.rows.map((f) => {
-      let detail = null;
-      try { detail = f.detail ? JSON.parse(f.detail) : null; } catch (e) { /* keep null */ }
-      return { ...f, detail };
+    const found = r.rows.map(parseDetail);
+    const access = await checkAccess(found.flatMap(sourcesOf));
+    const names = await displayNames(ownerIdsOf(found, access));
+    return { rows: found.map((f) => presentFinding(f, access, names)) };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// Confirm rotation, dismiss with a reason, or allowlist a value or a whole source.
+resolver.define('secretAction', async ({ payload, context }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'ADMINISTER_PROJECTS');
+    if (denied) return { error: denied };
+    return await performSecretAction({
+      projectKey: payload.projectKey, findingId: payload.findingId, action: payload.action,
+      reason: payload.reason, code: payload.code, actor: context && context.accountId,
     });
-    return { rows };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// Where remediation issues are created (one project for the whole site).
+resolver.define('getRemediationConfig', async ({ payload }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    return {
+      config: (await getRemediationConfig()) || { enabled: false, projectKey: payload.projectKey },
+      canEdit: await hasPermission(payload.projectKey, 'ADMINISTER_PROJECTS'),
+    };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+resolver.define('saveRemediationConfig', async ({ payload, context }) => {
+  try {
+    const target = String(payload.targetProject || '').trim().toUpperCase();
+    // The person must administer both the project they are in and the project that will receive issues.
+    for (const key of new Set([payload.projectKey, target])) {
+      const denied = await guard(key, 'ADMINISTER_PROJECTS');
+      if (denied) return { error: `${key}: ${denied}` };
+    }
+    const check = await jiraGet(route`/rest/api/3/project/${target}`, { asApp: true });
+    if (check.status === 404) return { error: `Project ${target} was not found, or the app cannot see it` };
+    await json(check);
+    await sql
+      .prepare(
+        `INSERT INTO project_rules (id, project_key, rule_key, enabled, config, updated_by)
+         VALUES (?, '_site', 'secret_remediation', ?, ?, ?)
+         ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), config = VALUES(config),
+           updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`
+      )
+      .bindParams(newId(), payload.enabled ? 1 : 0, JSON.stringify({ projectKey: target }), (context && context.accountId) || null)
+      .execute();
+    // Findings that opened before this was switched on get their issues now.
+    const filled = payload.enabled ? await backfillRemediation() : { queued: 0 };
+    return { config: { enabled: !!payload.enabled, projectKey: target }, queued: filled.queued };
   } catch (e) {
     return { error: describe(e) };
   }

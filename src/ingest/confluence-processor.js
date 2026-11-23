@@ -10,7 +10,7 @@
 import { extractDecisions, pageText } from '../decisions/extract.js';
 import { planSync, planRemoval } from '../decisions/sync.js';
 
-export function makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSecrets, rescore, recordIngest }) {
+export function makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSecrets, queueHistory, rescore, recordIngest }) {
   return async function processConfluencePage(job) {
     if (!job || !job.sourceId) throw new Error('confluence_page job has no page id (sourceId)');
     const pageId = String(job.sourceId);
@@ -29,9 +29,11 @@ export function makeConfluenceProcessor({ fetchPage, loadExisting, apply, scanSe
         await apply(plan, { pageId, title: page.title, version: page.version, decidedAt: page.decidedAt });
         changed = plan.supersedeIds.length > 0;
         if (scanSecrets) {
-          const r = await scanSecrets({ pageId, title: page.title, version: page.version, text: pageText(page.storage) });
+          const r = await scanSecrets({ pageId, title: page.title, version: page.version, ownerId: page.ownerId, text: pageText(page.storage) });
           changed = changed || r.changed;
         }
+        // Earlier versions may hold secrets that were deleted from the current text.
+        if (queueHistory && Number(page.version) > 1) await queueHistory(pageId, page.version);
       }
     }
     if (changed && rescore) await rescore();

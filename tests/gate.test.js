@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_POLICY, normalizePolicy } from '../src/gate/policy.js';
+import { DEFAULT_POLICY, normalizePolicy, normalizeRules, ruleId } from '../src/gate/policy.js';
 import { evaluateGate, severityFromPriority, findNotesLinks, confluencePageId } from '../src/gate/evaluate.js';
 import { makeGateRunner } from '../src/gate/runner.js';
 import { computeScore, DEFAULT_CONFIG } from '../src/score/engine.js';
@@ -176,4 +176,63 @@ test('refreshVersions: skips released, unknown and invalid ids; respects limit',
   assert.equal(await r.refreshVersions('T', ['10001', '10002', '999', 'x']), 1);
   assert.equal(r.calls.filter((c) => c[0] === 'assess').length, 1);
   assert.equal(await r.refreshVersions('T', []), 0);
+});
+
+test('policy: statuses and rules are cleaned, capped and get a stable id', () => {
+  const p = normalizePolicy({ requiredStatuses: ' Done, done, Released ,, ', customRules: [
+    { name: 'QA', jql: ' labels = qa ', severity: 9 }, { name: '', jql: 'x' }, { name: 'n', jql: '' }, null,
+  ] });
+  assert.deepEqual(p.requiredStatuses, ['Done', 'Released']);
+  assert.equal(p.customRules.length, 1);
+  assert.equal(p.customRules[0].severity, 3);
+  assert.equal(p.customRules[0].jql, 'labels = qa');
+  assert.equal(p.customRules[0].id, ruleId('labels = qa'));
+  assert.equal(normalizeRules(Array.from({ length: 9 }, (_, i) => ({ name: 'n' + i, jql: 'j' + i }))).length, 5);
+});
+
+test('required statuses: only listed states count as ready', () => {
+  const mk = (key, name, cat) => ({ ...issue(key), fields: { ...issue(key).fields, status: { name, statusCategory: { key: cat } } } });
+  const issues = [mk('T-1', 'Done', 'done'), mk('T-2', 'Won\'t do', 'done')];
+  const policy = normalizePolicy({ requiredStatuses: ['Done'] });
+  const r = evaluateGate({ version, issues, notes: goodNotes, policy, now: NOW });
+  assert.equal(r.findings.length, 1);
+  assert.match(r.findings[0].title, /T-2/);
+  const plain = evaluateGate({ version, issues, notes: goodNotes, policy: DEFAULT_POLICY, now: NOW });
+  assert.equal(plain.findings.length, 0);
+});
+
+test('custom rules: matches become findings, errors become a warning row', () => {
+  const rule = normalizeRules([{ name: 'Needs QA', jql: 'labels = qa', severity: 3 }])[0];
+  const r = evaluateGate({ version, issues: [issue('T-1', { done: true })], notes: goodNotes, policy: DEFAULT_POLICY, now: NOW,
+    rules: [{ rule, issues: [issue('T-1', { done: true })] }, { rule: { ...rule, id: 'rbad', name: 'Bad' }, issues: [], error: 'nope' }] });
+  const f = r.findings.find((x) => x.key === `rule:${rule.id}:T-1`);
+  assert.ok(f); assert.equal(f.severity, 3);
+  assert.equal(r.checks.find((c) => c.key === `rule:${rule.id}`).status, 'fail');
+  assert.equal(r.checks.find((c) => c.key === 'rule:rbad').status, 'warn');
+});
+
+test('critical findings row: pass, fail, and off by policy', () => {
+  const run = (criticalOpen, policy = DEFAULT_POLICY) =>
+    evaluateGate({ version, issues: [issue('T-1', { done: true })], notes: goodNotes, policy, now: NOW, criticalOpen }).checks.find((c) => c.key === 'critical');
+  assert.equal(run(0).status, 'pass');
+  assert.equal(run(2).status, 'fail');
+  assert.equal(run(null), undefined);
+  assert.equal(run(2, { ...DEFAULT_POLICY, requireNoCriticalFindings: false }), undefined);
+});
+
+test('runner: rules run, a 400 is reported on its row, other errors stop the run', async () => {
+  const rules = normalizeRules([{ name: 'A', jql: 'a = 1' }, { name: 'B', jql: 'b = 2' }]);
+  const policy = { ...DEFAULT_POLICY, customRules: rules };
+  const r = runner({
+    loadPolicy: async () => policy,
+    readRuleIssues: async (v, jql) => { if (jql === 'b = 2') { const e = new Error('bad'); e.status = 400; throw e; } return { issues: [issue('T-9')], truncated: false }; },
+    countCritical: async () => 1,
+  });
+  const out = await r.runGate('TRAC', '10001');
+  assert.equal(out.checks.find((c) => c.key === `rule:${rules[0].id}`).status, 'fail');
+  assert.equal(out.checks.find((c) => c.key === `rule:${rules[1].id}`).status, 'warn');
+  assert.equal(out.checks.find((c) => c.key === 'critical').status, 'fail');
+  const boom = runner({ loadPolicy: async () => policy, readRuleIssues: async () => { const e = new Error('down'); e.status = 503; throw e; } });
+  await assert.rejects(() => boom.runGate('TRAC', '10001'));
+  assert.equal(boom.calls.length, 0);
 });

@@ -16,6 +16,7 @@ export async function fetchPage(pageId) {
   if (p.status && p.status !== 'current') return null;
   return {
     title: p.title || '(untitled)',
+    ownerId: p.ownerId || null,
     version: p.version && p.version.number,
     decidedAt: p.version && p.version.createdAt ? new Date(p.version.createdAt) : null,
     storage: (p.body && p.body.storage && p.body.storage.value) || '',

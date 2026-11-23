@@ -1,6 +1,6 @@
 import sql from '@forge/sql';
 import { InvocationError, InvocationErrorCode } from '@forge/events';
-import { handleJob, isRetriable, retryDelaySeconds } from './ingest/handler';
+import { handleJob, isRetriable, retryPlan } from './ingest/handler';
 import { processors } from './ingest/processors';
 
 const deps = {
@@ -33,11 +33,11 @@ export async function handler(event) {
     const retryCount = event.retryContext ? event.retryContext.retryCount : 0;
     if (isRetriable(e) && retryCount < 6) {
       console.log('TW_JOB_RETRY', job.eventKey, retryCount, e.message);
+      const plan = retryPlan(e, retryCount);
       return new InvocationError({
-        retryAfter: retryDelaySeconds(retryCount),
-        retryReason: e.status === 429
-          ? InvocationErrorCode.FUNCTION_UPSTREAM_RATE_LIMITED
-          : InvocationErrorCode.FUNCTION_RETRY_REQUEST,
+        retryAfter: plan.retryAfter,
+        retryReason: InvocationErrorCode[plan.reason],
+        retryData: plan.retryData,
       });
     }
     console.log('TW_JOB_FAILED', job.eventKey, e.message);
