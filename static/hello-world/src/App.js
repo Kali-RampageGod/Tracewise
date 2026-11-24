@@ -620,14 +620,53 @@ function SettingsPage({ projectKey }) {
   );
 }
 
+function DecisionActions({ f, projectKey, onDone }) {
+  const [mode, setMode] = useState(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const run = (action, extra) => {
+    setBusy(true);
+    setErr(null);
+    invoke('decisionAction', { projectKey, findingId: f.findingId, action, ...extra })
+      .then((r) => { if (r.error) setErr(r.error); else onDone(); })
+      .catch((e) => setErr(errText(e)))
+      .finally(() => setBusy(false));
+  };
+  if (!mode) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <button disabled={busy} onClick={() => run('confirm')}>Confirm conflict</button>{' '}
+        <button onClick={() => setMode('dismiss')}>Dismiss</button>{' '}
+        <button onClick={() => setMode('amend')}>Amend</button>{' '}
+        <button onClick={() => setMode('supersede')}>Supersede</button>
+        {err && <div style={{ color: '#c9372c' }}>Error: {err}</div>}
+      </div>
+    );
+  }
+  const needsText = mode !== 'supersede';
+  const label = { dismiss: 'Why is this not a conflict?', amend: 'New decision text', supersede: 'Mark this decision as replaced?' }[mode];
+  const submit = () =>
+    run(mode, mode === 'dismiss' ? { comment: text } : mode === 'amend' ? { newText: text } : {});
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div><b>{label}</b></div>
+      {needsText && <input style={{ width: 280 }} value={text} onChange={(e) => setText(e.target.value)} />}{' '}
+      <button disabled={busy || (needsText && text.trim().length < 3)} onClick={submit}>Save</button>{' '}
+      <button disabled={busy} onClick={() => { setMode(null); setErr(null); }}>Cancel</button>
+      {err && <div style={{ color: '#c9372c' }}>Error: {err}</div>}
+    </div>
+  );
+}
+
 function IssuePanel({ projectKey, issueId }) {
   const [flags, setFlags] = useState(null);
   const [err, setErr] = useState(null);
-  useEffect(() => {
+  const load = () =>
     invoke('getIssueFlags', { projectKey, issueId })
       .then((r) => (r && r.error ? setErr(r.error) : setFlags(r.flags)))
       .catch((e) => setErr(errText(e)));
-  }, [projectKey, issueId]);
+  useEffect(() => { load(); }, [projectKey, issueId]);
 
   if (err) return <p style={{ color: '#c9372c' }}>{err}</p>;
   if (!flags) return <p>Loading...</p>;
@@ -650,6 +689,7 @@ function IssuePanel({ projectKey, issueId }) {
             <p style={{ margin: '8px 0' }}><strong>Why:</strong> {f.rationale || 'No rationale recorded.'}</p>
             <div style={{ color: '#555', fontSize: 13 }}>Matched words: {f.shared.join(', ')}</div>
             <a href="#" onClick={(e) => { e.preventDefault(); openPage(f.pageId); }}>Open decision: {f.pageTitle}</a>
+            <DecisionActions f={f} projectKey={projectKey} onDone={load} />
           </div>
         )
       )}

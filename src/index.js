@@ -22,6 +22,7 @@ import { sourcesOf, ownerIdsOf, buildDeductionRows, latestPerRelease, presentFin
 import { maskDecisions } from './decisions/list';
 import { PAGE_SIZE, parseStatus, shapeDecisions } from './decisions/list';
 import { shapeIssueFlags } from './decisions/issue-flags';
+import { performDecisionAction } from './decisions/actions-glue';
 
 const resolver = new Resolver();
 
@@ -317,6 +318,20 @@ resolver.define('getIssueFlags', async ({ payload, context }) => {
     }
     const access = await checkAccess(decisions.map((d) => ({ kind: 'page', id: String(d.page_id) })));
     return { flags: shapeIssueFlags(f.rows, decisions, access) };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// Confirm, amend, supersede or dismiss a decision conflict.
+resolver.define('decisionAction', async ({ payload, context }) => {
+  try {
+    const denied = await guard(payload.projectKey, 'EDIT_ISSUES');
+    if (denied) return { error: denied };
+    return await performDecisionAction({
+      projectKey: payload.projectKey, findingId: payload.findingId, action: payload.action,
+      comment: payload.comment, newText: payload.newText, actor: context && context.accountId,
+    });
   } catch (e) {
     return { error: describe(e) };
   }
