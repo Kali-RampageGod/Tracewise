@@ -32,14 +32,14 @@ export async function scanIssue(projectKey, issueKey) {
     // 2. Read the active decisions of this project.
     const d = await sql
         .prepare(
-            `SELECT id, page_id, page_title, decision_text, status
+            `SELECT id, project_key, page_id, page_title, decision_text, status, title, scope, rationale, decided_at
          FROM decisions WHERE project_key IN (?, '_site') AND status = 'active'`
         )
         .bindParams(projectKey)
         .execute();
 
     // 3. Keyword match, then save one finding per matched decision.
-    const matches = findMatches(text, d.rows);
+    const matches = findMatches(text, d.rows, { projectKey });
     for (const m of matches) {
         const dec = m.decision;
         // Same issue + same decision = same fingerprint, so clicking twice makes no duplicate.
@@ -50,6 +50,7 @@ export async function scanIssue(projectKey, issueKey) {
             pageId: dec.page_id,
             pageTitle: dec.page_title,
             shared: m.shared,
+            score: Math.round(m.score * 100) / 100,
             ownerAccountId: ((issue.fields.assignee || issue.fields.reporter) || {}).accountId || null,
         });
         await sql

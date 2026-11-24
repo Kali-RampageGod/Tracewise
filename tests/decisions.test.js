@@ -131,3 +131,38 @@ test('processor: job without page id is rejected', async () => {
   const { proc } = harness({ page: null });
   await assert.rejects(proc({}), /no page id/);
 });
+
+const T = (rows) => `<table><tbody>${rows.map(([k, v]) => `<tr><th>${k}</th><td><p>${v}</p></td></tr>`).join('')}</tbody></table>`;
+
+test('template: fields parsed, table not read twice', () => {
+  const d = extractDecisions(T([['Decision', 'We decided to use Forge SQL.'], ['Status', 'Active'],
+  ['Scope', 'storage'], ['Rationale', 'Relational queries'], ['Date', '2026-11-20']]));
+  assert.equal(d.length, 1);
+  assert.equal(d[0].scope, 'storage');
+  assert.equal(d[0].rationale, 'Relational queries');
+  assert.equal(d[0].decidedOn, '2026-11-20');
+});
+
+test('template: non-active status raises nothing; rationale edit changes hash', () => {
+  assert.equal(extractDecisions(T([['Decision', 'Use Redis for the queue.'], ['Status', 'Superseded']])).length, 0);
+  const a = extractDecisions(T([['Decision', 'Use Redis for the queue.'], ['Rationale', 'fast']]));
+  const b = extractDecisions(T([['Decision', 'Use Redis for the queue.'], ['Rationale', 'cheap']]));
+  assert.equal(a[0].blockId, b[0].blockId);
+  assert.notEqual(a[0].hash, b[0].hash);
+});
+test('BM25: the decision about the rarer shared words ranks first', () => {
+  const sql = { id: 'd2', status: 'active', page_title: 'Decision: Forge SQL', decision_text: 'We will use Forge SQL for findings storage.' };
+  const other = { id: 'd3', status: 'active', page_title: 'Decision: Storage', decision_text: 'We keep findings storage simple and storage cheap.' };
+  const r = findMatches('Move findings storage to Redis, forge sql is slow', [other, sql, mysql]);
+  assert.equal(r[0].decision.id, 'd2');
+  assert.ok(r[0].score > r[1].score);
+});
+
+test('BM25: score is positive; superseded, empty query and empty list give nothing', () => {
+  const r = findMatches('Set up MongoDB for the orders database', [mysql]);
+  assert.ok(r[0].score > 0);
+  assert.equal(findMatches('Set up MongoDB for the orders database', [{ ...mysql, status: 'superseded' }]).length, 0);
+  assert.equal(findMatches('', [mysql]).length, 0);
+  assert.equal(findMatches('MongoDB database', []).length, 0);
+});
+

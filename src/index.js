@@ -21,6 +21,8 @@ import { displayNames } from './overview/people';
 import { sourcesOf, ownerIdsOf, buildDeductionRows, latestPerRelease, presentFinding } from './overview/rows';
 import { maskDecisions } from './decisions/list';
 import { PAGE_SIZE, parseStatus, shapeDecisions } from './decisions/list';
+import { shapeIssueFlags } from './decisions/issue-flags';
+
 const resolver = new Resolver();
 
 const describe = (e) =>
@@ -282,6 +284,39 @@ resolver.define('getDecisions', async ({ payload }) => {
     const shaped = shapeDecisions(r.rows, replacements, f.rows);
     const access = await checkAccess(shaped.rows.map((d) => ({ kind: 'page', id: String(d.pageId) })));
     return { ...shaped, rows: maskDecisions(shaped.rows, access) };
+  } catch (e) {
+    return { error: describe(e) };
+  }
+});
+
+// Jira issue panel: open decision conflicts of this work item, with each decision's rationale.
+resolver.define('getIssueFlags', async ({ payload, context }) => {
+  try {
+    const ext = (context && context.extension) || {};
+    const projectKey = (ext.project && ext.project.key) || payload.projectKey;
+    const issueId = String((ext.issue && ext.issue.id) || payload.issueId || '');
+    if (!/^[0-9]{1,20}$/.test(issueId)) return { error: 'Invalid work item' };
+    const denied = await guard(projectKey, 'BROWSE_PROJECTS');
+    if (denied) return { error: denied };
+    const f = await sql
+      .prepare(
+        `SELECT id, title, detail FROM findings
+          WHERE project_key = ? AND type = 'decision_conflict' AND status = 'open'
+            AND source_type = 'jira_issue' AND source_id = ? LIMIT 20`
+      )
+      .bindParams(projectKey, issueId)
+      .execute();
+    const ids = [...new Set(f.rows.map((r) => { try { return JSON.parse(r.detail).decisionId; } catch (e) { return null; } }).filter(Boolean))];
+    let decisions = [];
+    if (ids.length) {
+      const d = await sql
+        .prepare(`SELECT id, page_id, page_title, decision_text, title, scope, rationale, decided_at FROM decisions WHERE id IN (${ids.map(() => '?').join(',')})`)
+        .bindParams(...ids)
+        .execute();
+      decisions = d.rows;
+    }
+    const access = await checkAccess(decisions.map((d) => ({ kind: 'page', id: String(d.page_id) })));
+    return { flags: shapeIssueFlags(f.rows, decisions, access) };
   } catch (e) {
     return { error: describe(e) };
   }

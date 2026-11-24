@@ -59,3 +59,48 @@ test('best match comes first and only 3 are returned', () => {
     assert.equal(r[0].decision.id, 'd');
     assert.ok(r[0].score >= r[1].score && r[1].score >= r[2].score);
 });
+
+test('BM25: the decision about the rarer shared words ranks first', () => {
+    const sql = { id: 'd2', status: 'active', page_title: 'Decision: Forge SQL', decision_text: 'We will use Forge SQL for findings storage.' };
+    const other = { id: 'd3', status: 'active', page_title: 'Decision: Storage', decision_text: 'We keep findings storage simple and storage cheap.' };
+    const r = findMatches('Move findings storage to Redis, forge sql is slow', [other, sql, mysql]);
+    assert.equal(r[0].decision.id, 'd2');
+    assert.ok(r[0].score > r[1].score);
+});
+
+test('BM25: score is positive; superseded, empty query and empty list give nothing', () => {
+    const r = findMatches('Set up MongoDB for the orders database', [mysql]);
+    assert.ok(r[0].score > 0);
+    assert.equal(findMatches('Set up MongoDB for the orders database', [{ ...mysql, status: 'superseded' }]).length, 0);
+    assert.equal(findMatches('', [mysql]).length, 0);
+    assert.equal(findMatches('MongoDB database', []).length, 0);
+});
+
+const mkDec = (id, extra = {}) => ({
+    id, status: 'active', page_title: 'Decision: ' + id,
+    decision_text: 'We will use Forge SQL for findings storage.', ...extra
+});
+const QUERY = 'Move findings storage off forge sql';
+
+test('boost: matching scope ranks a decision higher', () => {
+    const r = findMatches(QUERY, [mkDec('a'), mkDec('b', { scope: 'storage' })]);
+    assert.equal(r[0].decision.id, 'b');
+});
+
+test('boost: newer decision ranks above an old one, project key counts', () => {
+    const now = Date.parse('2026-12-06');
+    const r = findMatches(QUERY, [mkDec('old', { decided_at: '2024-01-01' }), mkDec('new', { decided_at: '2026-12-01' })], { now });
+    assert.equal(r[0].decision.id, 'new');
+    const p = findMatches(QUERY, [mkDec('x'), mkDec('y', { project_key: 'TRAC' })], { projectKey: 'TRAC' });
+    assert.equal(p[0].decision.id, 'y');
+});
+
+test('threshold: minScore drops weak matches; top 3 only', () => {
+    assert.equal(findMatches(QUERY, [mkDec('a')], { minScore: 999 }).length, 0);
+    assert.equal(findMatches(QUERY, [mkDec('a'), mkDec('b'), mkDec('c'), mkDec('d')]).length, 3);
+});
+
+test('scope and rationale are searchable', () => {
+    const d = { id: 'r', status: 'active', page_title: 'X', decision_text: 'Chosen option approved.', rationale: 'Relational queries' };
+    assert.equal(findMatches('Need relational queries chosen', [d]).length, 1);
+});

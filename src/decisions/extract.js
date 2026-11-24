@@ -36,15 +36,66 @@ export const isDecision = (text) => text.length >= 15 && text.length <= 1000 && 
 
 export const MAX_DECISIONS_PER_PAGE = 100;
 
-// Decision blocks of a page, de-duplicated by block id, each with a content hash.
+// ---- Decision template: a two-column Confluence table ----
+const TABLE_RE = /<table\b[^>]*>[\s\S]*?<\/table>/gi;
+const ROW_RE = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+const CELL_RE = /<(t[hd])\b([^>]*)>([\s\S]*?)<\/\1>/gi;
+const ACTIVE_WORDS = new Set(['', 'active', 'accepted', 'approved', 'decided']);
+
+// Returns { decision } or null when the table is not a decision template.
+// decision is null when it is a template whose status is not active.
+function parseTemplate(table) {
+  const f = {};
+  let blockId = null;
+  for (const row of table.matchAll(ROW_RE)) {
+    const cells = [...row[1].matchAll(CELL_RE)];
+    if (cells.length < 2) continue;
+    const label = stripTags(cells[0][3]).toLowerCase().replace(/[:\s]+$/, '');
+    f[label] = stripTags(cells[1][3]);
+    if (label === 'decision') {
+      const lid = /local-id="([^"]+)"/.exec(row[0]);
+      blockId = lid ? lid[1] : null;
+    }
+  }
+  if (!f.decision || !(f.status !== undefined || f.scope !== undefined || f.rationale !== undefined)) return null;
+  if (!ACTIVE_WORDS.has((f.status || '').toLowerCase())) return { decision: null };
+  if (f.decision.length < 5 || f.decision.length > 1000) return { decision: null };
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(f.date || '') ? f.date : null;
+  const fields = {
+    title: (f.title || f.decision).slice(0, 255),
+    scope: (f.scope || '').slice(0, 255) || null,
+    rationale: (f.rationale || '').slice(0, 2000) || null,
+    decidedOn: date,
+  };
+  return {
+    decision: {
+      blockId: blockId || 'h-' + sha256(f.decision).slice(0, 12),
+      text: f.decision,
+      ...fields,
+      // Hash covers every field, so a rationale-only edit counts as a change.
+      hash: sha256([f.decision, fields.scope, fields.rationale, date].join('\u0001')),
+    },
+  };
+}
+
+// Template tables first, then free-text sentences that sound like decisions.
 export function extractDecisions(storage) {
   const seen = new Set();
   const out = [];
-  for (const b of extractBlocks(storage)) {
-    if (!isDecision(b.text) || seen.has(b.blockId)) continue;
-    seen.add(b.blockId);
-    out.push({ ...b, hash: sha256(b.text) });
-    if (out.length >= MAX_DECISIONS_PER_PAGE) break;
+  const add = (d) => {
+    if (seen.has(d.blockId) || out.length >= MAX_DECISIONS_PER_PAGE) return;
+    seen.add(d.blockId);
+    out.push(d);
+  };
+  // Template tables are removed so the sentence pass does not read them twice.
+  const rest = String(storage || '').replace(TABLE_RE, (table) => {
+    const t = parseTemplate(table);
+    if (!t) return table;
+    if (t.decision) add(t.decision);
+    return '';
+  });
+  for (const b of extractBlocks(rest)) {
+    if (isDecision(b.text)) add({ ...b, hash: sha256(b.text), title: null, scope: null, rationale: null, decidedOn: null });
   }
   return out;
 }

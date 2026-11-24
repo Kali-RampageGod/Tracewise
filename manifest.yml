@@ -17,6 +17,13 @@ modules:
       resolver:
         function: resolver
       title: TraceWise
+  jira:issuePanel:
+    - key: tracewise-issue-panel
+      resource: main
+      resolver:
+        function: resolver
+      title: TraceWise
+      icon: https://developer.atlassian.com/platform/forge/images/issue-panel-icon.svg
   rovo:agent:
     - key: tracewise-advisor
       name: Tracewise Release Advisor

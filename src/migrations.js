@@ -121,6 +121,11 @@ const SECRET_ALLOWLIST = `CREATE TABLE secret_allowlist (
   UNIQUE KEY uq_allow (scope, value)
 )`;
 
+const DECISIONS_TEMPLATE_FIELDS = `ALTER TABLE decisions
+  ADD COLUMN title VARCHAR(255) NULL,
+  ADD COLUMN scope VARCHAR(255) NULL,
+  ADD COLUMN rationale TEXT NULL`;
+
 const migrations = migrationRunner
   .enqueue('v002_create_decisions', DECISIONS)
   .enqueue('v003_create_findings', FINDINGS)
@@ -131,7 +136,9 @@ const migrations = migrationRunner
   .enqueue('v008_create_project_rules', PROJECT_RULES)
   .enqueue('v009_create_release_assessments', RELEASE_ASSESSMENTS)
   .enqueue('v010_findings_remediation', FINDINGS_REMEDIATION)
-  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST);
+  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST)
+  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST)
+  .enqueue('v012_decisions_template_fields', DECISIONS_TEMPLATE_FIELDS);
 
 export const runMigration = async () => {
   const applied = await migrations.run();

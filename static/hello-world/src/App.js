@@ -116,7 +116,7 @@ function GateTab({ projectKey, initialVersionId }) {
     const t = setInterval(() => {
       invoke('runGate', { projectKey, versionId })
         .then((r) => { if (!r.error) setGate(r); })
-        .catch(() => {});
+        .catch(() => { });
     }, 60000);
     return () => clearInterval(t);
   }, [projectKey, versionId]);
@@ -620,15 +620,58 @@ function SettingsPage({ projectKey }) {
   );
 }
 
+function IssuePanel({ projectKey, issueId }) {
+  const [flags, setFlags] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    invoke('getIssueFlags', { projectKey, issueId })
+      .then((r) => (r && r.error ? setErr(r.error) : setFlags(r.flags)))
+      .catch((e) => setErr(errText(e)));
+  }, [projectKey, issueId]);
+
+  if (err) return <p style={{ color: '#c9372c' }}>{err}</p>;
+  if (!flags) return <p>Loading...</p>;
+  if (!flags.length) return <p>No decision conflicts for this work item.</p>;
+  return (
+    <div>
+      {flags.map((f) =>
+        f.restricted ? (
+          <div key={f.findingId} style={{ ...card, borderColor: '#e2b203' }}>
+            This work item may conflict with a decision you do not have access to.
+          </div>
+        ) : (
+          <div key={f.findingId} style={{ ...card, borderColor: '#e2b203' }}>
+            <strong>May contradict: {f.title}</strong>
+            <div style={{ color: '#555', fontSize: 13 }}>
+              {f.decidedAt ? 'Decided ' + String(f.decidedAt).slice(0, 10) : 'Decided'}
+              {f.scope ? ' · scope: ' + f.scope : ''}
+            </div>
+            <p style={{ margin: '8px 0' }}>{f.text}</p>
+            <p style={{ margin: '8px 0' }}><strong>Why:</strong> {f.rationale || 'No rationale recorded.'}</p>
+            <div style={{ color: '#555', fontSize: 13 }}>Matched words: {f.shared.join(', ')}</div>
+            <a href="#" onClick={(e) => { e.preventDefault(); openPage(f.pageId); }}>Open decision: {f.pageTitle}</a>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [ctx, setCtx] = useState(null);
   useEffect(() => { view.getContext().then(setCtx); }, []);
   if (!ctx) return <div style={{ padding: 16 }}>Loading...</div>;
-  const projectKey = ctx.extension && ctx.extension.project ? ctx.extension.project.key : null;
+  const ext = ctx.extension || {};
+  const projectKey = ext.project ? ext.project.key : null;
   const isSettings = ctx.moduleKey === 'tracewise-settings-page';
+  const isPanel = ctx.moduleKey === 'tracewise-issue-panel';
   return (
     <div style={{ padding: 16, fontFamily: 'sans-serif' }}>
-      {isSettings ? <SettingsPage projectKey={projectKey} /> : <ProjectPage projectKey={projectKey} />}
+      {isPanel
+        ? <IssuePanel projectKey={projectKey} issueId={ext.issue ? ext.issue.id : null} />
+        : isSettings
+          ? <SettingsPage projectKey={projectKey} />
+          : <ProjectPage projectKey={projectKey} />}
     </div>
   );
 }
