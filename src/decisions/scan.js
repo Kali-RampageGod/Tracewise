@@ -39,7 +39,7 @@ export async function scanIssue(projectKey, issueKey) {
         .execute();
 
     // 3. Keyword match, then save one finding per matched decision.
-    const matches = findMatches(text, d.rows, { projectKey });
+    const matches = findMatches(text, d.rows, { projectKey, minOverlap: 1, minScore: 3.5 });
     for (const m of matches) {
         const dec = m.decision;
         // Same issue + same decision = same fingerprint, so clicking twice makes no duplicate.

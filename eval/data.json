@@ -1,0 +1,386 @@
+{
+    "decisions": [
+        {
+            "id": "d1",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Use MySQL, not MongoDB",
+            "decision_text": "We will use MySQL as the database. We will not use MongoDB.",
+            "scope": "database",
+            "decided_at": "2026-06-01"
+        },
+        {
+            "id": "d2",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: React for the frontend",
+            "decision_text": "All web frontends are built in React. We will not use Angular.",
+            "scope": "frontend",
+            "decided_at": "2026-06-10"
+        },
+        {
+            "id": "d3",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Google OAuth login only",
+            "decision_text": "Authentication uses OAuth 2.0 with Google login. No custom passwords or own login forms.",
+            "scope": "auth",
+            "decided_at": "2026-07-02"
+        },
+        {
+            "id": "d4",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Deploy on AWS ECS",
+            "decision_text": "Services are deployed on AWS ECS. We will not use Kubernetes.",
+            "scope": "deployment",
+            "decided_at": "2026-07-15"
+        },
+        {
+            "id": "d5",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: REST API, no GraphQL",
+            "decision_text": "All public APIs are REST. We will not add GraphQL endpoints.",
+            "scope": "api",
+            "decided_at": "2026-08-01"
+        },
+        {
+            "id": "d6",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Stripe for payments",
+            "decision_text": "Payments go only through Stripe. We will not integrate PayPal.",
+            "scope": "payments",
+            "decided_at": "2026-08-12"
+        },
+        {
+            "id": "d7",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Datadog for logs",
+            "decision_text": "All application logs go to Datadog. No self-hosted ELK or Elasticsearch.",
+            "scope": "logging",
+            "decided_at": "2026-09-03"
+        },
+        {
+            "id": "d8",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: TypeScript for new services",
+            "decision_text": "All new backend services are written in TypeScript, not plain JavaScript.",
+            "scope": "language",
+            "decided_at": "2026-09-20"
+        },
+        {
+            "id": "d9",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Images in S3 with CloudFront",
+            "decision_text": "Product images are stored in S3 and served through CloudFront. No local disk storage for uploads.",
+            "scope": "storage",
+            "decided_at": "2026-10-05"
+        },
+        {
+            "id": "d10",
+            "status": "active",
+            "project_key": "SHOP",
+            "page_title": "Decision: Redis for caching",
+            "decision_text": "Caching uses Redis. We will not use Memcached.",
+            "scope": "caching",
+            "decided_at": "2026-10-20"
+        }
+    ],
+    "issues": [
+        {
+            "id": "i1",
+            "project_key": "SHOP",
+            "text": "Set up MongoDB for the orders database. Create a MongoDB cluster.",
+            "gold": [
+                "d1"
+            ]
+        },
+        {
+            "id": "i2",
+            "project_key": "SHOP",
+            "text": "Migrate product catalog storage to MongoDB for flexible schemas",
+            "gold": [
+                "d1"
+            ]
+        },
+        {
+            "id": "i3",
+            "project_key": "SHOP",
+            "text": "Build the new admin dashboard in Angular with Angular Material components",
+            "gold": [
+                "d2"
+            ]
+        },
+        {
+            "id": "i4",
+            "project_key": "SHOP",
+            "text": "Create a custom login form with email and password stored in our own users table",
+            "gold": [
+                "d3"
+            ]
+        },
+        {
+            "id": "i5",
+            "project_key": "SHOP",
+            "text": "Deploy the checkout service to a new Kubernetes cluster using Helm charts",
+            "gold": [
+                "d4"
+            ]
+        },
+        {
+            "id": "i6",
+            "project_key": "SHOP",
+            "text": "Add a GraphQL endpoint for the mobile app product queries",
+            "gold": [
+                "d5"
+            ]
+        },
+        {
+            "id": "i7",
+            "project_key": "SHOP",
+            "text": "Integrate PayPal checkout button on the cart page",
+            "gold": [
+                "d6"
+            ]
+        },
+        {
+            "id": "i8",
+            "project_key": "SHOP",
+            "text": "Set up a self-hosted ELK stack to collect application logs",
+            "gold": [
+                "d7"
+            ]
+        },
+        {
+            "id": "i9",
+            "project_key": "SHOP",
+            "text": "Write the new inventory service in plain JavaScript with Express",
+            "gold": [
+                "d8"
+            ]
+        },
+        {
+            "id": "i10",
+            "project_key": "SHOP",
+            "text": "Save uploaded product images to the local disk of the web server",
+            "gold": [
+                "d9"
+            ]
+        },
+        {
+            "id": "i11",
+            "project_key": "SHOP",
+            "text": "Use Memcached to cache product listings",
+            "gold": [
+                "d10"
+            ]
+        },
+        {
+            "id": "i12",
+            "project_key": "SHOP",
+            "text": "Add username and password login so customers do not need a Google account",
+            "gold": [
+                "d3"
+            ]
+        },
+        {
+            "id": "i13",
+            "project_key": "SHOP",
+            "text": "Spin up Kubernetes for staging deployment of the orders API",
+            "gold": [
+                "d4"
+            ]
+        },
+        {
+            "id": "i14",
+            "project_key": "SHOP",
+            "text": "Store user session data in MongoDB",
+            "gold": [
+                "d1"
+            ]
+        },
+        {
+            "id": "i15",
+            "project_key": "SHOP",
+            "text": "Send application logs to our own Elasticsearch and Kibana servers",
+            "gold": [
+                "d7"
+            ]
+        },
+        {
+            "id": "i16",
+            "project_key": "SHOP",
+            "text": "Add an index on the MySQL orders table to speed up order queries",
+            "gold": [
+                "d1"
+            ]
+        },
+        {
+            "id": "i17",
+            "project_key": "SHOP",
+            "text": "Build the order history page in React with a paginated table",
+            "gold": [
+                "d2"
+            ]
+        },
+        {
+            "id": "i18",
+            "project_key": "SHOP",
+            "text": "Add Google login button to the signup page using OAuth 2.0",
+            "gold": [
+                "d3"
+            ]
+        },
+        {
+            "id": "i19",
+            "project_key": "SHOP",
+            "text": "Increase the ECS task memory for the checkout service deployment",
+            "gold": [
+                "d4"
+            ]
+        },
+        {
+            "id": "i20",
+            "project_key": "SHOP",
+            "text": "Add REST endpoint to fetch product reviews with pagination",
+            "gold": [
+                "d5"
+            ]
+        },
+        {
+            "id": "i21",
+            "project_key": "SHOP",
+            "text": "Handle failed Stripe payments and show a retry message",
+            "gold": [
+                "d6"
+            ]
+        },
+        {
+            "id": "i22",
+            "project_key": "SHOP",
+            "text": "Add Datadog dashboard for API error rates from the logs",
+            "gold": [
+                "d7"
+            ]
+        },
+        {
+            "id": "i23",
+            "project_key": "SHOP",
+            "text": "Convert the notification service to TypeScript",
+            "gold": [
+                "d8"
+            ]
+        },
+        {
+            "id": "i24",
+            "project_key": "SHOP",
+            "text": "Serve product images through CloudFront with longer cache TTL",
+            "gold": [
+                "d9"
+            ]
+        },
+        {
+            "id": "i25",
+            "project_key": "SHOP",
+            "text": "Cache the product listing in Redis with five minute expiry",
+            "gold": [
+                "d10"
+            ]
+        },
+        {
+            "id": "i26",
+            "project_key": "SHOP",
+            "text": "Update the privacy policy text in the footer",
+            "gold": []
+        },
+        {
+            "id": "i27",
+            "project_key": "SHOP",
+            "text": "Fix typo in the welcome email subject line",
+            "gold": []
+        },
+        {
+            "id": "i28",
+            "project_key": "SHOP",
+            "text": "Change the color of the Add to cart button to green",
+            "gold": []
+        },
+        {
+            "id": "i29",
+            "project_key": "SHOP",
+            "text": "Write onboarding guide for new support staff",
+            "gold": []
+        },
+        {
+            "id": "i30",
+            "project_key": "SHOP",
+            "text": "Plan the team offsite agenda for January",
+            "gold": []
+        },
+        {
+            "id": "i31",
+            "project_key": "SHOP",
+            "text": "Customer cannot download invoice PDF from the account page",
+            "gold": []
+        },
+        {
+            "id": "i32",
+            "project_key": "SHOP",
+            "text": "Improve the empty state illustration on the wishlist page",
+            "gold": []
+        },
+        {
+            "id": "i33",
+            "project_key": "SHOP",
+            "text": "Prepare the quarterly sales report for management",
+            "gold": []
+        },
+        {
+            "id": "i34",
+            "project_key": "SHOP",
+            "text": "Review the return policy wording with legal",
+            "gold": []
+        },
+        {
+            "id": "i35",
+            "project_key": "SHOP",
+            "text": "Add dark mode toggle to the settings page",
+            "gold": []
+        },
+        {
+            "id": "i36",
+            "project_key": "SHOP",
+            "text": "Translate the product descriptions into Hindi",
+            "gold": []
+        },
+        {
+            "id": "i37",
+            "project_key": "SHOP",
+            "text": "Update the page title tags for better search ranking",
+            "gold": []
+        },
+        {
+            "id": "i38",
+            "project_key": "SHOP",
+            "text": "Schedule weekly restore drill with the operations team",
+            "gold": []
+        },
+        {
+            "id": "i39",
+            "project_key": "SHOP",
+            "text": "Add payment terms note to the invoice footer",
+            "gold": []
+        },
+        {
+            "id": "i40",
+            "project_key": "SHOP",
+            "text": "Review the database design workshop notes",
+            "gold": []
+        }
+    ]
+}
