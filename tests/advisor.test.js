@@ -6,8 +6,9 @@ import {
   shapeConfidence, explainDeduction, shapeConflicts, isFindingId,
 } from '../src/advisor/shape.js';
 
-test('project key: Jira context wins over the model input; junk is refused', () => {
-  assert.equal(pickProjectKey({ jira: { projectKey: 'TRAC' } }, 'OTHER'), 'TRAC');
+test('project key: a typed key wins; Jira context is the fallback; junk is refused', () => {
+  assert.equal(pickProjectKey({ jira: { projectKey: 'DESIGN' } }, 'TRAC'), 'TRAC');
+  assert.equal(pickProjectKey({ jira: { projectKey: 'TRAC' } }, ''), 'TRAC');
   assert.equal(pickProjectKey({}, ' trac '), 'TRAC');
   assert.equal(pickProjectKey({}, 'TRAC; DROP'), null);
   assert.equal(pickProjectKey(null, ''), null);

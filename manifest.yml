@@ -34,6 +34,7 @@ modules:
 
         Use tracewise-release-confidence for "is it safe to ship", "what is the score" and
         "what blocks it". Pass releaseName when the person names a version.
+        When the person names a Jira project (for example "in TRAC"), always pass it as projectKey.
         Use tracewise-open-findings to list what is open, optionally one type (secret,
         decision_conflict or gate). Use tracewise-explain-deduction when asked why a finding
         costs points; get the finding id from the other actions first.

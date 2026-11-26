@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeScore } from '../src/score/engine.js';
+import { computeScore, DEFAULT_CONFIG } from '../src/score/engine.js';
 
 // Helper: builds one finding. Override only what the test cares about.
 let n = 0;
@@ -60,8 +60,9 @@ test('unclear critical secret does not force blocked', () => {
 });
 
 test('band edges: 80 is ready, 78 is at_risk, 50 is at_risk', () => {
-  assert.equal(computeScore([f(), f()]).band, 'ready'); // 100-20 = 80
-  const r78 = computeScore([f(), f(), f({ severity: 1 })]); // 100-22
+  const noCap = { ...DEFAULT_CONFIG, readyBlockedBySeverity: 0 }; // test the score lines alone
+  assert.equal(computeScore([f(), f()], noCap).band, 'ready'); // 100-20 = 80
+  const r78 = computeScore([f(), f(), f({ severity: 1 })], noCap); // 100-22
   assert.equal(r78.score, 78);
   assert.equal(r78.band, 'at_risk');
   const r50 = computeScore([
@@ -91,4 +92,37 @@ test('score never goes below 0', () => {
     ...[1, 2].map(() => f({ type: 'other', severity: 4 })),
   ];
   assert.equal(computeScore(list).score, 0);
+});
+test('a confirmed high finding caps Ready at At risk, whatever the score', () => {
+  const r = computeScore([f()]); // 100-10 = 90 would be ready
+  assert.equal(r.score, 90);
+  assert.equal(r.band, 'at_risk');
+  assert.equal(r.blockedReason, 'A high-severity finding is still open');
+});
+
+test('medium and low findings do not cap Ready', () => {
+  assert.equal(computeScore([f({ severity: 2 }), f({ severity: 1 })]).band, 'ready');
+});
+
+test('an unclear high finding does not cap Ready', () => {
+  const r = computeScore([f({ evidence_confidence: 60 })]);
+  assert.equal(r.band, 'ready');
+  assert.equal(r.blockedReason, null);
+});
+
+test('a closed high finding does not cap Ready', () => {
+  assert.equal(computeScore([f({ status: 'resolved' }), f({ status: 'dismissed' })]).band, 'ready');
+});
+
+test('the cap can be switched off, and a forced block keeps its own reason', () => {
+  assert.equal(computeScore([f()], { ...DEFAULT_CONFIG, readyBlockedBySeverity: 0 }).band, 'ready');
+  const r = computeScore([f({ type: 'secret', severity: 4 })]);
+  assert.equal(r.band, 'blocked');
+  assert.equal(r.blockedReason, 'Critical secret found');
+});
+
+test('a score already at risk keeps its band and gets no cap reason', () => {
+  const r = computeScore([f(), f(), f(), f()]); // 100-40 = 60
+  assert.equal(r.band, 'at_risk');
+  assert.equal(r.blockedReason, null);
 });

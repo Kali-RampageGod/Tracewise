@@ -15,6 +15,9 @@ export const DEFAULT_CONFIG = {
   // When true, an open confirmed critical (Highest/Blocker) gate finding forces Blocked.
   // Off by default; the Release Gate turns it on from the project policy.
   forceBlockGate: false,
+  // A confirmed finding of this severity or higher means the release cannot be called Ready,
+  // whatever the score. 0 switches the rule off.
+  readyBlockedBySeverity: 3,
   // score bands
   readyAt: 80,   // 80-100 = ready
   atRiskAt: 50,  // 50-79 = at_risk, below = blocked
@@ -24,6 +27,7 @@ export function computeScore(findings, config = DEFAULT_CONFIG) {
   const rows = [];      // one row per finding that took points off
   const perType = {};   // running total taken off per type
   let forcedBlock = null;
+  let highOpen = false; // a confirmed finding at or above readyBlockedBySeverity
 
   for (const f of findings) {
     if (f.status !== 'open') continue; // resolved or dismissed: ignore
@@ -32,6 +36,8 @@ export function computeScore(findings, config = DEFAULT_CONFIG) {
     let share = 0;
     if (f.evidence_confidence >= config.confirmedAt) share = 1;
     else if (f.evidence_confidence >= config.unclearAt) share = config.unclearShare;
+
+    if (share === 1 && config.readyBlockedBySeverity && f.severity >= config.readyBlockedBySeverity) highOpen = true;
 
     // 2. A confirmed critical secret blocks the release, no matter the score.
     if (f.type === 'secret' && f.severity >= 4 && share === 1) {
@@ -69,5 +75,12 @@ export function computeScore(findings, config = DEFAULT_CONFIG) {
            : 'blocked';
   if (forcedBlock) band = 'blocked';
 
-  return { score, band, blockedReason: forcedBlock, breakdown: rows };
+  // One serious confirmed problem cannot hide behind a good number.
+  let reason = forcedBlock;
+  if (!forcedBlock && band === 'ready' && highOpen) {
+    band = 'at_risk';
+    reason = 'A high-severity finding is still open';
+  }
+
+  return { score, band, blockedReason: reason, breakdown: rows };
 }

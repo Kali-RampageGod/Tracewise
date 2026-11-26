@@ -15,13 +15,13 @@ export const isFindingId = (s) => FINDING_ID.test(String(s || ''));
 // is only a fallback, because a model can make up a key.
 export function pickProjectKey(context, input) {
   const fromContext = context && context.jira && context.jira.projectKey;
-  const raw = String(fromContext || input || '').trim().toUpperCase();
+  const raw = String(input || fromContext || '').trim().toUpperCase();
   return PROJECT_KEY.test(raw) ? raw : null;
 }
 
 export function pickIssueKey(context, input) {
   const fromContext = context && context.jira && context.jira.issueKey;
-  const raw = String(fromContext || input || '').trim().toUpperCase();
+  const raw = String(input || fromContext || '').trim().toUpperCase();
   return ISSUE_KEY.test(raw) ? raw : null;
 }
 
