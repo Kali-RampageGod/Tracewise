@@ -137,7 +137,6 @@ const migrations = migrationRunner
   .enqueue('v009_create_release_assessments', RELEASE_ASSESSMENTS)
   .enqueue('v010_findings_remediation', FINDINGS_REMEDIATION)
   .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST)
-  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST)
   .enqueue('v012_decisions_template_fields', DECISIONS_TEMPLATE_FIELDS);
 
 export const runMigration = async () => {

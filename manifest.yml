@@ -27,31 +27,111 @@ modules:
   rovo:agent:
     - key: tracewise-advisor
       name: Tracewise Release Advisor
-      description: Explains the release confidence score for a project.
+      description: Answers whether a release is safe to ship, what blocks it, and whether a work item conflicts with a team decision. Reads Tracewise results only.
       prompt: >
-        You are the Tracewise Release Advisor. When the user asks about release
-        readiness or open findings, call the tracewise-ping action and report
-        exactly what it returns. Do not invent numbers.
+        You are the Tracewise Release Advisor. You answer only from what the Tracewise
+        actions return. Never invent a score, a finding, a decision or a link.
+
+        Use tracewise-release-confidence for "is it safe to ship", "what is the score" and
+        "what blocks it". Pass releaseName when the person names a version.
+        Use tracewise-open-findings to list what is open, optionally one type (secret,
+        decision_conflict or gate). Use tracewise-explain-deduction when asked why a finding
+        costs points; get the finding id from the other actions first.
+        Use tracewise-check-work-item when asked whether a work item conflicts with a decision.
+
+        Rules:
+        - Start with the verdict and score, then the biggest reasons, then the next step.
+        - Quote the action's "asOf" time when you give a score, and say the data is as of then.
+        - Give the source link for each item you mention when the action returns one.
+        - If an item is marked restricted, say it exists but you cannot show it. Never guess its contents.
+        - If an action returns an error or no data, say so plainly. Do not fill the gap.
+        - A decision conflict is a possible conflict until a person confirms it. Say so.
+        - Quote a decision's rationale only if the action gives one. If it says none is recorded,
+          say that. Matched keywords only explain why it matched; they are not a rationale.
+        - Report the verdict word as Tracewise's verdict (for example "Tracewise verdict: Ready").
+          Do not promise the release is safe.
+        - You cannot change a score, a finding or a decision. If asked to, say you can only read them
+          and point to the Tracewise page in the Jira project.
+        - Never repeat a secret value. Findings only show a redacted preview.
       conversationStarters:
-        - How many open findings does Tracewise have?
+        - Is our next release safe to ship?
+        - What is blocking the release?
+        - Why did this finding cost so many points?
+        - Does this work item conflict with a decision?
       actions:
-        - tracewise-ping
+        - tracewise-release-confidence
+        - tracewise-open-findings
+        - tracewise-explain-deduction
+        - tracewise-check-work-item
   consumer:
     - key: tracewise-ingest-consumer
       queue: tracewise-ingest
       function: ingest-consumer
   action:
-    - key: tracewise-ping
-      name: Tracewise ping
-      function: rovo-ping
+    - key: tracewise-release-confidence
+      name: Release confidence
+      function: advisor-confidence
       actionVerb: GET
-      description: Returns the number of open findings stored by Tracewise.
+      description: Returns the release confidence score, verdict (Ready, At risk or Blocked), the reason it is blocked, and the biggest deductions for a Jira project or one version. Use for "is it safe to ship" and "what blocks it".
       inputs:
-        question:
-          title: Question
+        projectKey:
+          title: Project key
           type: string
           required: false
-          description: The user's question, for context only.
+          description: The Jira project key, for example TRAC. Leave empty when the person is already in a project.
+        releaseName:
+          title: Release name
+          type: string
+          required: false
+          description: The version name, for example v2.4. Leave empty for the whole project.
+    - key: tracewise-open-findings
+      name: Open findings
+      function: advisor-findings
+      actionVerb: GET
+      description: Lists the open findings of a Jira project, worst first, with severity, age and a link to the source. Can be limited to one type.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: The Jira project key, for example TRAC.
+        type:
+          title: Type
+          type: string
+          required: false
+          description: Only this type, one of secret, decision_conflict or gate. Leave empty for all.
+        limit:
+          title: Limit
+          type: integer
+          required: false
+          description: How many findings to return, 1 to 15. Default 10.
+    - key: tracewise-explain-deduction
+      name: Explain deduction
+      function: advisor-explain
+      actionVerb: GET
+      description: Explains in plain steps why one finding takes off the number of points it does. Needs a finding id from the other Tracewise actions.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: The Jira project key, for example TRAC.
+        findingId:
+          title: Finding id
+          type: string
+          required: true
+          description: The findingId returned by another Tracewise action.
+    - key: tracewise-check-work-item
+      name: Check work item
+      function: advisor-workitem
+      actionVerb: GET
+      description: Shows whether a Jira work item has an open possible conflict with a team decision, with the decision, its rationale and a link to the page.
+      inputs:
+        issueKey:
+          title: Work item key
+          type: string
+          required: false
+          description: The work item key, for example TRAC-9. Leave empty when the person is on the work item.
   trigger:
     - key: tracewise-jira-events
       function: source-event
@@ -73,8 +153,14 @@ modules:
       handler: index.handler
     - key: run-migration
       handler: migrations.runMigration
-    - key: rovo-ping
-      handler: rovo-poc.ping
+    - key: advisor-confidence
+      handler: advisor/index.releaseConfidence
+    - key: advisor-findings
+      handler: advisor/index.openFindings
+    - key: advisor-explain
+      handler: advisor/index.explainDeductionTool
+    - key: advisor-workitem
+      handler: advisor/index.checkWorkItem
     - key: source-event
       handler: triggers.onSourceEvent
     - key: ingest-consumer

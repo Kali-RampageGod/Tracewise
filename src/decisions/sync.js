@@ -29,8 +29,9 @@ export function planSync(existing, current) {
   for (const d of current.decisions) {
     const latest = (byBlock.get(d.blockId) || [])[0];
     if (latest && latest.content_hash === d.hash) {
-      keep.push({ id: latest.id });
       protectedIds.add(latest.id);
+      // A person superseded this decision in Tracewise. An unchanged page must not bring it back.
+      if (!(latest.status === 'superseded' && Number(latest.manual) > 0)) keep.push({ id: latest.id });
     } else {
       upserts.push({ ...d, supersedesId: latest ? latest.id : null });
       // A row of this same version is rewritten in place by the upsert (same unique key).

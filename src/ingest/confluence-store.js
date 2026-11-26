@@ -25,7 +25,9 @@ export async function fetchPage(pageId) {
 
 export async function loadExisting(pageId) {
   const r = await sql
-    .prepare('SELECT id, page_version, block_id, content_hash, status FROM decisions WHERE page_id = ?')
+    .prepare(`SELECT id, page_version, block_id, content_hash, status,
+            (SELECT COUNT(*) FROM decision_feedback f WHERE f.decision_id = decisions.id AND f.verdict = 'supersede') AS manual
+       FROM decisions WHERE page_id = ?`)
     .bindParams(pageId)
     .execute();
   return r.rows;
