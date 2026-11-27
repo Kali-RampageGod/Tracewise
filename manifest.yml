@@ -139,6 +139,9 @@ modules:
       events:
         - avi:jira:created:issue
         - avi:jira:updated:issue
+  preUninstall:
+    - key: tracewise-pre-uninstall
+      function: pre-uninstall
   sql:
     - key: main
       engine: mysql
@@ -154,6 +157,8 @@ modules:
       handler: index.handler
     - key: run-migration
       handler: migrations.runMigration
+    - key: pre-uninstall
+      handler: uninstall.preUninstall
     - key: advisor-confidence
       handler: advisor/index.releaseConfidence
     - key: advisor-findings
@@ -179,6 +184,7 @@ permissions:
     - read:confluence-content.summary
     - read:jira-work
     - write:jira-work
+    - read:jira-user
 app:
   runtime:
     name: nodejs24.x

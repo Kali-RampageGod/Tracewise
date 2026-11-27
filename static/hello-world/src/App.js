@@ -573,49 +573,53 @@ function ProjectPage({ projectKey }) {
   );
 }
 
-function SettingsPage({ projectKey }) {
-  const [out, setOut] = useState('');
+function HealthCard({ projectKey }) {
+  const [h, setH] = useState(null);
+  const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pageId, setPageId] = useState('');
-  const [issueKey, setIssueKey] = useState('TRAC-2');
-  const call = async (name, payload) => {
+  const load = () => invoke('getHealth', { projectKey }).then(setH).catch((e) => setH({ error: errText(e) }));
+  useEffect(() => { load(); }, [projectKey]);
+  const run = (action) => {
     setBusy(true);
-    setOut('Running ' + name + '...');
-    try { setOut(String(await invoke(name, payload))); }
-    catch (e) { setOut('Error: ' + (e && e.message ? e.message : JSON.stringify(e))); }
-    setBusy(false);
+    setMsg(action === 'scan' ? 'Scanning...' : 'Running migrations...');
+    invoke('adminAction', { projectKey, action })
+      .then((r) => { setMsg(r.error ? 'Error: ' + r.error : 'Done.'); load(); })
+      .catch((e) => setMsg('Error: ' + errText(e)))
+      .finally(() => setBusy(false));
   };
+  const ago = (m) => (m == null ? 'never' : m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} hours ago`);
+  if (!h) return <div style={card}><b>Health</b><p>Loading...</p></div>;
+  if (h.error) return <div style={card}><b>Health</b><p>{h.error}</p></div>;
+  return (
+    <div style={card}>
+      <b>Health</b> {h.status === 'ok' ? '· Everything is working' : '· Needs attention'}
+      {h.problems.map((p, i) => <p key={i} style={{ color: '#c9372c' }}>{p}</p>)}
+      <ul>
+        <li>Database: {h.migrations.applied} of {h.migrations.expected} migrations applied</li>
+        {h.scans.map((s) => (
+          <li key={s.name}>{s.name} scan: {s.status === 'error' ? 'failed' : 'ok'}, last finished {ago(s.lastFinishedMinutesAgo)}</li>
+        ))}
+        <li>Events handled in the last 24 hours: {h.events.last24h} (last one {ago(h.events.lastMinutesAgo)})</li>
+        <li>Decisions: {h.counts.decisionsActive} active of {h.counts.decisionsTotal}</li>
+        <li>Open findings: {Object.keys(h.counts.openFindings).length
+          ? Object.entries(h.counts.openFindings).map(([t, n]) => `${n} ${t.replace('_', ' ')}`).join(', ')
+          : 'none'}</li>
+      </ul>
+      <button disabled={busy} onClick={() => run('migrate')}>Run migrations</button>{' '}
+      <button disabled={busy} onClick={() => run('scan')}>Scan now</button>{' '}
+      <button disabled={busy} onClick={load}>Refresh</button> {msg}
+      <p style={{ color: '#626f86', fontSize: 12 }}>Detection may take a few minutes after a page or work item changes. This panel shows counts only.</p>
+    </div>
+  );
+}
+
+function SettingsPage({ projectKey }) {
   return (
     <div>
       <h2>TraceWise settings {projectKey ? `· ${projectKey}` : ''}</h2>
       <PolicyCard projectKey={projectKey} />
       <RemediationCard projectKey={projectKey} />
-      <div style={card}>
-        <b>Database</b>
-        <div>
-          <button disabled={busy} onClick={() => call('migrate')}>Run migrations</button>{' '}
-          <button disabled={busy} onClick={() => call('migrationStatus')}>Show applied migrations</button>
-          <button disabled={busy} onClick={() => call('reconcileNow')}>Run scan now</button>
-          <button disabled={busy} onClick={() => call('processedEvents')}>Show processed events</button>
-
-          <br /><br />
-          <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'gate', severity: 3 })}>Add high gate problem</button>{' '}
-          <button disabled={busy} onClick={() => call('scoreDemo', { projectKey, type: 'secret', severity: 4 })}>Add critical secret</button>{' '}
-          <button disabled={busy} onClick={() => call('scoreDemoClear', { projectKey })}>Clear demo data</button>
-
-          <br /><br />
-          <input placeholder="Confluence page id" value={pageId} onChange={(e) => setPageId(e.target.value)} />{' '}
-          <button disabled={busy} onClick={() => call('decisionDemoCreate', { projectKey, pageId })}>Create demo decision</button>{' '}
-          <button disabled={busy} onClick={() => call('decisionDemoClear', { projectKey })}>Clear demo decision</button>
-
-          <br /><br />
-          <input value={issueKey} onChange={(e) => setIssueKey(e.target.value)} />{' '}
-          <button disabled={busy} onClick={() => call('decisionDemoScan', { projectKey, issueKey })}>Scan issue</button>
-
-          {' '}<button disabled={busy} onClick={() => call('secretScanClear', { projectKey })}>Clear scanned secrets</button>
-        </div>
-        <pre style={{ whiteSpace: 'pre-wrap' }}>{out}</pre>
-      </div>
+      <HealthCard projectKey={projectKey} />
     </div>
   );
 }

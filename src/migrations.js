@@ -126,18 +126,40 @@ const DECISIONS_TEMPLATE_FIELDS = `ALTER TABLE decisions
   ADD COLUMN scope VARCHAR(255) NULL,
   ADD COLUMN rationale TEXT NULL`;
 
-const migrations = migrationRunner
-  .enqueue('v002_create_decisions', DECISIONS)
-  .enqueue('v003_create_findings', FINDINGS)
-  .enqueue('v004_create_finding_events', FINDING_EVENTS)
-  .enqueue('v005_create_processed_events', PROCESSED_EVENTS)
-  .enqueue('v006_create_scan_state', SCAN_STATE)
-  .enqueue('v007_create_decision_feedback', DECISION_FEEDBACK)
-  .enqueue('v008_create_project_rules', PROJECT_RULES)
-  .enqueue('v009_create_release_assessments', RELEASE_ASSESSMENTS)
-  .enqueue('v010_findings_remediation', FINDINGS_REMEDIATION)
-  .enqueue('v011_create_secret_allowlist', SECRET_ALLOWLIST)
-  .enqueue('v012_decisions_template_fields', DECISIONS_TEMPLATE_FIELDS);
+// v001 made a throw-away test table in the first proof of concept. It stays in the list so the
+// order of already-applied migrations does not change; v013 removes the leftover table.
+const POC_TABLE = `CREATE TABLE IF NOT EXISTS poc_findings (
+  id BIGINT PRIMARY KEY AUTO_RANDOM,
+  type VARCHAR(32) NOT NULL,
+  severity TINYINT NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'open',
+  source_id VARCHAR(128) NOT NULL,
+  fingerprint CHAR(64) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_poc (type, source_id, fingerprint),
+  INDEX idx_poc_status (status)
+)`;
+
+export const MIGRATION_LIST = [
+  ['v001_create_poc_findings', POC_TABLE],
+  ['v002_create_decisions', DECISIONS],
+  ['v003_create_findings', FINDINGS],
+  ['v004_create_finding_events', FINDING_EVENTS],
+  ['v005_create_processed_events', PROCESSED_EVENTS],
+  ['v006_create_scan_state', SCAN_STATE],
+  ['v007_create_decision_feedback', DECISION_FEEDBACK],
+  ['v008_create_project_rules', PROJECT_RULES],
+  ['v009_create_release_assessments', RELEASE_ASSESSMENTS],
+  ['v010_findings_remediation', FINDINGS_REMEDIATION],
+  ['v011_create_secret_allowlist', SECRET_ALLOWLIST],
+  ['v012_decisions_template_fields', DECISIONS_TEMPLATE_FIELDS],
+  ['v013_drop_poc_findings', 'DROP TABLE IF EXISTS poc_findings'],
+];
+export const MIGRATION_NAMES = MIGRATION_LIST.map(([name]) => name);
+
+let migrations = migrationRunner;
+for (const [name, statement] of MIGRATION_LIST) migrations = migrations.enqueue(name, statement);
 
 export const runMigration = async () => {
   const applied = await migrations.run();

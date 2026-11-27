@@ -12,6 +12,7 @@ async function lookup(id) {
   try {
     const res = await jiraGet(route`/rest/api/3/user?accountId=${id}`, { asApp: true });
     if (res.status === 200) name = (await json(res)).displayName || null;
+    else console.log('TW_USER_LOOKUP_STATUS', res.status);
   } catch (e) { /* a missing name is fine */ }
   cache.set(id, { name, at: Date.now() });
   return name;
